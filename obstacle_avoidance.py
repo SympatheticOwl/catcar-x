@@ -33,9 +33,6 @@ class AsyncObstacleAvoidance:
         self.is_backing_up = False  # Flag to track backup operations
         self.is_cliff = False
 
-        # Create event loop
-        self.loop = asyncio.get_event_loop()
-
     async def ultrasonic_monitoring(self):
         while True:
             distances = []
@@ -71,12 +68,18 @@ class AsyncObstacleAvoidance:
             self.is_cliff = self.px.get_cliff_status(self.px.get_grayscale_data())
 
             if self.is_cliff:
-                print(f"Emergency stop, cliff detected!")
-                self.emergency_stop_flag = True
-                # Cancel any ongoing maneuver except backup
-                if self.current_maneuver:
-                    self.current_maneuver.cancel()
-                await self.emergency_stop()
+                # stop immediately
+                self.px.forward(0)
+
+                if (self.is_moving and
+                        not self.emergency_stop_flag and
+                        not self.is_backing_up):  # Don't interrupt backup
+                    print(f"Emergency stop, cliff detected!")
+                    self.emergency_stop_flag = True
+                    # Cancel any ongoing maneuver except backup
+                    if self.current_maneuver:
+                        self.current_maneuver.cancel()
+                    await self.emergency_stop()
 
             await asyncio.sleep(0.05)  # Sensor read frequency
 
@@ -203,14 +206,17 @@ class AsyncObstacleAvoidance:
         """Manage forward movement with obstacle checking"""
         while True:
             if not self.emergency_stop_flag and not self.current_maneuver:
-                if self.current_distance >= self.min_distance:
+                if self.current_distance >= self.min_distance and not self.is_cliff:
                     if not self.is_moving:
                         print("Moving forward...")
                         self.is_moving = True
                         self.px.forward(self.speed)
                 else:
                     if self.is_moving:
-                        print(f"Obstacle detected at {self.current_distance:.1f}cm")
+                        if self.is_cliff:
+                            print("Cliff detected!")
+                        else:
+                            print(f"Obstacle detected at {self.current_distance:.1f}cm")
                         self.is_moving = False
                         self.px.forward(0)
                         self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
