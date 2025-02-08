@@ -12,25 +12,26 @@ class AsyncObstacleAvoidance:
         self.tts = TTS()
         self.tts.lang("en-US")
 
-        # Configuration parameters
+        # configuration parameters
         self.min_distance = 15
         self.backup_time = 1.0
         self.long_backup_time = 2.0
-        self.turn_time = 1.2
+        self.turn_time = 1.5
         self.speed = 30
+        self.sensor_read_freq = 0.05
 
-        # Turn history tracking
-        self.turn_history = deque(maxlen=5)
-        self.turn_timestamps = deque(maxlen=5)
-        self.stuck_threshold = timedelta(seconds=10)
-        self.pattern_threshold = 4
+        # turn history tracking
+        self.turn_history = deque(maxlen=10)
+        self.turn_timestamps = deque(maxlen=10)
+        self.stuck_threshold = timedelta(seconds=5)
+        self.pattern_threshold = 5
 
-        # State management
+        # state management
         self.current_distance = 100
         self.is_moving = False
         self.current_maneuver = None
         self.emergency_stop_flag = False
-        self.is_backing_up = False  # Flag to track backup operations
+        self.is_backing_up = False  # since this is async we don't want to interrupt evasive backup maneuvers while obejcts are still too close
         self.is_cliff = False
 
     async def ultrasonic_monitoring(self):
@@ -38,7 +39,7 @@ class AsyncObstacleAvoidance:
             distances = []
             for _ in range(3):
                 # I don't really understand what the purpose of ultrasonic.read() accepting an optional int value
-                # to loop readings but doesn't do any averaging itself...
+                # to loop readings but doesn't do any averaging itself unless I'm misunderstanding the code...
                 distance = self.px.ultrasonic.read()
                 if distance and 0 < distance < 300:
                     distances.append(distance)
@@ -49,81 +50,75 @@ class AsyncObstacleAvoidance:
 
                 print(f"Distance: {self.current_distance:.1f} cm")
 
-                # Emergency stop if too close during forward movement only
+                # emergency stop if too close during forward movement only
                 if (self.current_distance < self.min_distance and
                         self.is_moving and
                         not self.emergency_stop_flag and
                         not self.is_backing_up):  # Don't interrupt backup
                     print(f"Emergency stop! Object detected at {self.current_distance:.1f}cm")
-                    self.emergency_stop_flag = True
-                    # Cancel any ongoing maneuver except backup
-                    if self.current_maneuver:
-                        self.current_maneuver.cancel()
                     await self.emergency_stop()
 
-            await asyncio.sleep(0.05)  # Sensor read frequency
+            await asyncio.sleep(self.sensor_read_freq)
 
     async def cliff_monitoring(self):
         while True:
             self.is_cliff = self.px.get_cliff_status(self.px.get_grayscale_data())
 
-            if self.is_cliff:
-                # stop immediately
-                self.px.forward(0)
+            if (self.is_cliff and
+                    self.is_moving and
+                    not self.emergency_stop_flag and
+                    not self.is_backing_up):
+                print(f"Emergency stop, cliff detected!")
+                await self.emergency_stop()
 
-                if (self.is_moving and
-                        not self.emergency_stop_flag and
-                        not self.is_backing_up):  # Don't interrupt backup
-                    print(f"Emergency stop, cliff detected!")
-                    self.emergency_stop_flag = True
-                    # Cancel any ongoing maneuver except backup
-                    if self.current_maneuver:
-                        self.current_maneuver.cancel()
-                    await self.emergency_stop()
-
-            await asyncio.sleep(0.05)  # Sensor read frequency
+            await asyncio.sleep(self.sensor_read_freq)
 
     async def emergency_stop(self):
-        """Immediately stop all movement"""
+        self.emergency_stop_flag = True
+        # cancel any ongoing maneuver except backup
+        if self.current_maneuver:
+            self.current_maneuver.cancel()
+
         self.is_moving = False
         self.px.forward(0)
         self.px.set_dir_servo_angle(0)
-        await asyncio.sleep(0.5)  # Brief pause after emergency stop
+        await asyncio.sleep(0.5)
         self.emergency_stop_flag = False
-        # Schedule evasive maneuver
         self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
 
     def is_stuck_in_pattern(self):
-        print("check stuck...")
-        """Check if car is stuck in an alternating turn pattern"""
+        print(f"Checking stuck pattern...")
+        print(f"Stuck pattern history length: {self.turn_history}...")
         print(len(self.turn_history))
         if len(self.turn_history) < self.pattern_threshold:
             return False
 
-        # if we have too many terms in a certain amount of time we'll assume we're stuck
+        # if we have too many turns in a certain amount of time we'll assume we're stuck
         # going back and forth in somewhere like a corner
         time_window = datetime.now() - self.stuck_threshold
         recent_turns = sum(1 for timestamp in self.turn_timestamps
                            if timestamp > time_window)
+        print(f"Recent turns within time window: {recent_turns}...")
 
         return recent_turns < self.pattern_threshold
 
     async def spin_turn_180(self):
-        """Execute 180-degree spin turn"""
-        print("Executing 180-degree spin turn...")
+        print("Executing signature spin turn...")
         self.is_moving = True
 
-        # Stop first
         self.px.forward(0)
         await asyncio.sleep(0.2)
 
         if not self.emergency_stop_flag:
             # idk why this works
-            self.px.set_motor_speed(1, self.speed)
-            self.px.set_motor_speed(2, self.speed)
-            await asyncio.sleep(4.5)
+            # spins wheels in opposite direction
+            # depending on friction of terrain will usually achieve
+            # somewhere between 90-180 degress
+            spin_direction = self.choose_turn_direction()
+            self.px.set_motor_speed(1, spin_direction * self.speed)
+            self.px.set_motor_speed(2, spin_direction * self.speed)
+            await asyncio.sleep(5)
 
-            # Stop spinning
             self.px.forward(0)
             await asyncio.sleep(0.2)
 
@@ -131,7 +126,10 @@ class AsyncObstacleAvoidance:
         self.is_moving = False
 
     def choose_turn_direction(self):
-        """Choose turn direction with basic pattern avoidance"""
+        # there was an attempt to detect stuck pattern by checking left/right
+        # alternating pattern on top of time
+        # despite being more consistent it defeated the purpose
+        # of chosing a "random" direction
         # if len(self.turn_history) > 0:
         #     # Avoid repeating the last turn direction
         #     last_turn = self.turn_history[-1]
@@ -139,20 +137,16 @@ class AsyncObstacleAvoidance:
         return random.choice([-1, 1])
 
     async def evasive_maneuver(self):
-        """Execute smart evasive maneuver"""
         stuck = self.is_stuck_in_pattern()
 
         try:
-            # Stop first
             self.is_moving = False
             self.px.forward(0)
-            # self.tts.say("obstacle detected")
             await asyncio.sleep(0.5)
-
-            # await asyncio.create_task(self.tts.say("obstacle detected"))
 
             if stuck:
                 print("Stuck pattern detected! Executing escape maneuver...")
+                # tts only works half the time and idk why
                 self.tts.say("am stuck, performing really cool spin move to escape")
 
                 self.is_moving = True
@@ -169,7 +163,7 @@ class AsyncObstacleAvoidance:
                     self.turn_timestamps.clear()
 
             else:
-                # Normal evasive maneuver
+                # normal evasive maneuver
                 print("Backing up...")
                 self.is_moving = True
                 self.is_backing_up = True
@@ -186,14 +180,12 @@ class AsyncObstacleAvoidance:
                 self.px.forward(self.speed)
                 await asyncio.sleep(self.turn_time)
 
-            # Reset to forward movement
             if not self.emergency_stop_flag:
                 self.px.set_dir_servo_angle(0)
                 self.is_moving = True
                 self.px.forward(self.speed)
 
         except asyncio.CancelledError:
-            # Handle cancellation gracefully
             self.px.forward(0)
             self.px.set_dir_servo_angle(0)
             self.is_moving = False
@@ -203,7 +195,6 @@ class AsyncObstacleAvoidance:
             self.current_maneuver = None
 
     async def forward_movement(self):
-        """Manage forward movement with obstacle checking"""
         while True:
             if not self.emergency_stop_flag and not self.current_maneuver:
                 if self.current_distance >= self.min_distance and not self.is_cliff:
@@ -224,32 +215,26 @@ class AsyncObstacleAvoidance:
             await asyncio.sleep(0.1)
 
     async def run(self):
-        print("Starting async obstacle avoidance program...")
+        print("Starting obstacle avoidance program...")
         tasks = []
         try:
-            # Create tasks for concurrent execution
+            # allow ultrasonic and cliff scanning to run concurrently with movement
             ultrasonic_task = asyncio.create_task(self.ultrasonic_monitoring())
             cliff_task = asyncio.create_task(self.cliff_monitoring())
             movement_task = asyncio.create_task(self.forward_movement())
             tasks = [ultrasonic_task, cliff_task, movement_task]
-
-            # Wait for both tasks (will run indefinitely until interrupted)
             await asyncio.gather(*tasks)
-
         except asyncio.CancelledError:
             print("\nShutting down gracefully...")
         finally:
-            # Cancel all running tasks
             for task in tasks:
                 task.cancel()
-
-            # Wait for tasks to complete their cancellation
             try:
                 await asyncio.gather(*tasks, return_exceptions=True)
             except asyncio.CancelledError:
                 pass
 
-            # Clean shutdown
+            # reset position on shutdown
             self.px.forward(0)
             self.px.set_dir_servo_angle(0)
             print("Shutdown complete")
