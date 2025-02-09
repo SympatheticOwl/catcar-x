@@ -110,10 +110,9 @@ class AsyncObstacleAvoidance:
         await asyncio.sleep(0.2)
 
         if not self.emergency_stop_flag:
-            # idk why this works
             # spins wheels in opposite direction
             # depending on friction of terrain will usually achieve
-            # somewhere between 90-180 degress
+            # somewhere between 90-180 degrees
             spin_direction = self.choose_turn_direction()
             self.px.set_motor_speed(1, spin_direction * self.speed)
             self.px.set_motor_speed(2, spin_direction * self.speed)
