@@ -69,7 +69,7 @@ class AsyncObstacleAvoidance:
             self.px.set_cam_pan_angle(angle)
             await asyncio.sleep(0.1)
 
-            distances = self.scan_avg()
+            distances = await self.scan_avg()
 
             if distances:
                 avg_dist = sum(distances) / len(distances)
@@ -110,6 +110,9 @@ class AsyncObstacleAvoidance:
                             0 <= map_y < self.map_size):
                         self.map[map_y, map_x] = 1
 
+        print("\nCurrent Map:")
+        self.visualize_map()
+
     def _polar_to_cartesian(self, angle_deg, distance):
         """Convert polar coordinates to cartesian"""
         angle_rad = math.radians(angle_deg)
@@ -119,7 +122,7 @@ class AsyncObstacleAvoidance:
 
     async def ultrasonic_monitoring(self):
         while True:
-            distances = self.scan_avg()
+            distances = await self.scan_avg()
             if distances:
                 self.current_distance = sum(distances) / len(distances)
 
@@ -202,6 +205,8 @@ class AsyncObstacleAvoidance:
     def choose_turn_direction(self):
         return random.choice([-1, 1])
 
+    #TODO: improve turn direction
+    # allow turning around if no good direction
     def find_best_direction(self, scan_data):
         """Analyze scan data to find the best direction to move"""
         max_distance = 0
@@ -282,6 +287,7 @@ class AsyncObstacleAvoidance:
             # allow ultrasonic and cliff scanning to run concurrently with movement
             ultrasonic_task = asyncio.create_task(self.ultrasonic_monitoring())
             cliff_task = asyncio.create_task(self.cliff_monitoring())
+            #TODO: fix initial scan
             movement_task = asyncio.create_task(self.forward_movement())
             tasks = [ultrasonic_task, cliff_task, movement_task]
             await asyncio.gather(*tasks)
@@ -301,6 +307,7 @@ class AsyncObstacleAvoidance:
             print("Shutdown complete")
 
 
+#TODO: fix shutdown
 def main():
     avoider = AsyncObstacleAvoidance()
     try:
