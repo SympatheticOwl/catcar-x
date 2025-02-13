@@ -287,7 +287,6 @@ class AsyncObstacleAvoidance:
             # allow ultrasonic and cliff scanning to run concurrently with movement
             ultrasonic_task = asyncio.create_task(self.ultrasonic_monitoring())
             cliff_task = asyncio.create_task(self.cliff_monitoring())
-            #TODO: fix initial scan
             movement_task = asyncio.create_task(self.forward_movement())
             tasks = [ultrasonic_task, cliff_task, movement_task]
             await asyncio.gather(*tasks)
