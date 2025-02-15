@@ -1,2 +1,3 @@
 navigation/*.tflite
 *.tflite
+coco_labels.txt
