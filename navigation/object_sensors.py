@@ -16,12 +16,16 @@ class AsyncObstacleAvoidance:
         self.speed = 30
         self.sensor_read_freq = 0.05
 
+        # Add padding configuration
+        self.padding_size = 2  # Number of cells to pad around obstacles
+        self.padding_structure = np.ones((3, 3))  # 3x3 structuring element for dilation
+
         # state management
         self.current_distance = 100
         self.is_moving = False
         self.current_maneuver = None
         self.emergency_stop_flag = False
-        self.is_backing_up = False  # since this is async we don't want to interrupt evasive backup maneuvers while obejcts are still too close
+        self.is_backing_up = False
         self.is_cliff = False
 
         # vision
@@ -33,11 +37,10 @@ class AsyncObstacleAvoidance:
         map_size = 100
         self.map_size = map_size
         self.map = np.zeros((map_size, map_size))
-        # self.car_pos = np.array([map_size // 2, map_size // 2])  # Start at center
-        self.car_pos = np.array([0, map_size // 2])  # Start at lower center
-        self.car_angle = 0  # Facing positive x-axis
-        self.scan_range = (-60, 60)  # degrees
-        self.scan_step = 5  # degrees
+        self.car_pos = np.array([0, map_size // 2])
+        self.car_angle = 0
+        self.scan_range = (-60, 60)
+        self.scan_step = 5
 
     def visualize_map(self):
         """Print ASCII visualization of the map"""
@@ -72,10 +75,11 @@ class AsyncObstacleAvoidance:
         return scan_data
 
     def update_map(self, scan_data):
-        """Update internal map with new scan data"""
+        """Update internal map with new scan data and add padding around obstacles"""
         # Clear previous readings
         self.map = np.zeros((self.map_size, self.map_size))
 
+        # Create initial map from scan data
         for i in range(len(scan_data) - 1):
             angle1, dist1 = scan_data[i]
             angle2, dist2 = scan_data[i + 1]
@@ -103,7 +107,14 @@ class AsyncObstacleAvoidance:
                             0 <= map_y < self.map_size):
                         self.map[map_y, map_x] = 1
 
-        print("\nCurrent Map:")
+        # Apply padding using binary dilation
+        self.map = binary_dilation(
+            self.map,
+            structure=self.padding_structure,
+            iterations=self.padding_size
+        )
+
+        print("\nCurrent Map (with padding):")
         self.visualize_map()
 
     def _polar_to_cartesian(self, angle_deg, distance):
@@ -158,14 +169,24 @@ class AsyncObstacleAvoidance:
         self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
 
     def find_best_direction(self, scan_data):
-        """Analyze scan data to find the best direction to move"""
+        """Analyze scan data to find the best direction to move, accounting for padded obstacles"""
         max_distance = 0
         best_angle = 0
 
+        # Consider the padded map when finding the best direction
         for angle, distance in scan_data:
-            if distance > max_distance:
-                max_distance = distance
-                best_angle = angle
+            # Convert the measured point to map coordinates
+            point = self._polar_to_cartesian(angle, distance)
+            map_x = int(point[0] + self.map_size // 2)
+            map_y = int(point[1] + self.map_size // 2)
+
+            # Check if the point and its surrounding area (padding) are clear
+            if (0 <= map_x < self.map_size and
+                    0 <= map_y < self.map_size and
+                    not self.map[map_y, map_x]):  # Check padded map
+                if distance > max_distance:
+                    max_distance = distance
+                    best_angle = angle
 
         return best_angle, max_distance
 
