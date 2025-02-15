@@ -1,3 +1,5 @@
 navigation/*.tflite
 *.tflite
 coco_labels.txt
+__pycache__/
+*/__pycache__/
