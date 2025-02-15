@@ -3,6 +3,7 @@ import asyncio
 import math
 from picarx import Picarx
 from vision_system import VisionSystem
+from scipy import ndimage
 
 class AsyncObstacleAvoidance:
     def __init__(self):
@@ -108,7 +109,7 @@ class AsyncObstacleAvoidance:
                         self.map[map_y, map_x] = 1
 
         # Apply padding using binary dilation
-        self.map = binary_dilation(
+        self.map = ndimage.binary_dilation(
             self.map,
             structure=self.padding_structure,
             iterations=self.padding_size
