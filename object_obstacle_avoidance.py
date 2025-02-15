@@ -4,18 +4,13 @@ import tflite_runtime.interpreter as tflite
 import libcamera
 import asyncio
 import time
-import random
 import math
 from picamera2 import Picamera2
 from picarx import Picarx
-from robot_hat import TTS
-from datetime import datetime
 
 class AsyncObstacleAvoidance:
     def __init__(self):
         self.px = Picarx()
-        self.tts = TTS()
-        self.tts.lang("en-US")
 
         # configuration parameters
         self.min_distance = 15
@@ -166,47 +161,6 @@ class AsyncObstacleAvoidance:
         self.emergency_stop_flag = False
         self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
 
-    def is_stuck_in_pattern(self):
-        print(f"Checking stuck pattern...")
-        print(f"Stuck pattern history length: {self.turn_history}...")
-        print(len(self.turn_history))
-        if len(self.turn_history) < self.pattern_threshold:
-            return False
-
-        # if we have too many turns in a certain amount of time we'll assume we're stuck
-        # going back and forth in somewhere like a corner
-        time_window = datetime.now() - self.stuck_threshold
-        recent_turns = sum(1 for timestamp in self.turn_timestamps
-                           if timestamp > time_window)
-        print(f"Recent turns within time window: {recent_turns}...")
-
-        return recent_turns < self.pattern_threshold
-
-    async def spin_turn_180(self):
-        print("Executing signature spin turn...")
-        self.is_moving = True
-
-        self.px.forward(0)
-        await asyncio.sleep(0.2)
-
-        if not self.emergency_stop_flag:
-            # spins wheels in opposite direction
-            # depending on friction of terrain will usually achieve
-            # somewhere between 90-180 degrees
-            spin_direction = self.choose_turn_direction()
-            self.px.set_motor_speed(1, spin_direction * self.speed)
-            self.px.set_motor_speed(2, spin_direction * self.speed)
-            await asyncio.sleep(5)
-
-            self.px.forward(0)
-            await asyncio.sleep(0.2)
-
-        self.px.set_dir_servo_angle(0)
-        self.is_moving = False
-
-    def choose_turn_direction(self):
-        return random.choice([-1, 1])
-
     def find_best_direction(self, scan_data):
         """Analyze scan data to find the best direction to move"""
         max_distance = 0
@@ -317,7 +271,6 @@ class AsyncObstacleAvoidance:
             self.px.forward(0)
             self.px.set_dir_servo_angle(0)
             print("Shutdown complete")
-
 
 class VisionSystem:
     def __init__(self, model_path='efficientdet_lite0.tflite', labels_path='coco_labels.txt'):
