@@ -4,6 +4,7 @@ import numpy as np
 from enum import Enum
 from typing import List, Tuple, Optional
 from vision_system import VisionSystem
+from picar_wrapper import PicarXMovement
 
 class NavigationState(Enum):
     MOVING = "moving"

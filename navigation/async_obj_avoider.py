@@ -1,12 +1,7 @@
-import cv2
 import numpy as np
-import tflite_runtime.interpreter as tflite
-import libcamera
 import asyncio
-import time
 import random
 import math
-from picamera2 import Picamera2
 from picarx import Picarx
 from robot_hat import TTS
 from collections import deque

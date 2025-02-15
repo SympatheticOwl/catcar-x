@@ -267,7 +267,7 @@ async def main():
         navigation.set_destination(5, 1)
         
         # Start sensor system
-        sensor_task = asyncio.create_task(sensor_system.run())
+        # sensor_task = asyncio.create_task(sensor_system.run())
         
         # Start navigation
         nav_task = asyncio.create_task(navigation.navigate())
@@ -279,10 +279,11 @@ async def main():
         print("\nNavigation interrupted!")
     finally:
         # Cleanup
-        sensor_task.cancel()
+        # sensor_task.cancel()
         nav_task.cancel()
         try:
-            await asyncio.gather(sensor_task, nav_task, return_exceptions=True)
+            # await asyncio.gather(sensor_task, nav_task, return_exceptions=True)
+            await asyncio.gather(nav_task, return_exceptions=True)
         except asyncio.CancelledError:
             pass
 
