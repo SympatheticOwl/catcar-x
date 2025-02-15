@@ -9,8 +9,7 @@ import math
 from picamera2 import Picamera2
 from picarx import Picarx
 from robot_hat import TTS
-from collections import deque
-from datetime import datetime, timedelta
+from datetime import datetime
 
 class AsyncObstacleAvoidance:
     def __init__(self):
@@ -26,12 +25,6 @@ class AsyncObstacleAvoidance:
         self.speed = 30
         self.sensor_read_freq = 0.05
 
-        # turn history tracking
-        self.turn_history = deque(maxlen=10)
-        self.turn_timestamps = deque(maxlen=10)
-        self.stuck_threshold = timedelta(seconds=5)
-        self.pattern_threshold = 5
-
         # state management
         self.current_distance = 100
         self.is_moving = False
@@ -39,6 +32,11 @@ class AsyncObstacleAvoidance:
         self.emergency_stop_flag = False
         self.is_backing_up = False  # since this is async we don't want to interrupt evasive backup maneuvers while obejcts are still too close
         self.is_cliff = False
+
+        # vision
+        self.vision = VisionSystem()
+        self.vision_enabled = True
+        self.vision_clear = True
 
         # scanning parameters
         map_size = 100
@@ -265,7 +263,17 @@ class AsyncObstacleAvoidance:
     async def forward_movement(self):
         while True:
             if not self.emergency_stop_flag and not self.current_maneuver:
-                if self.current_distance >= self.min_distance and not self.is_cliff:
+                # Check both ultrasonic and vision systems
+                if self.vision_enabled:
+                    objects = self.vision.get_obstacle_info()
+                    if objects:
+                        for obj in objects:
+                            print(f"Vision system detected: {obj['label']}")
+                            if obj['label'] == "stop sign":
+                                print("STOP!!!!")
+                                self.vision_clear = False
+
+                if (self.current_distance >= self.min_distance and not self.is_cliff):
                     if not self.is_moving:
                         print("Moving forward...")
                         self.is_moving = True
@@ -274,8 +282,10 @@ class AsyncObstacleAvoidance:
                     if self.is_moving:
                         if self.is_cliff:
                             print("Cliff detected!")
+                        elif not self.vision_clear:
+                            print("Vision system detected obstacle!")
                         else:
-                            print(f"Obstacle detected at {self.current_distance:.1f}cm")
+                            print(f"Ultrasonic detected obstacle at {self.current_distance:.1f}cm")
                         self.is_moving = False
                         self.px.forward(0)
                         self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
@@ -283,14 +293,15 @@ class AsyncObstacleAvoidance:
             await asyncio.sleep(0.1)
 
     async def run(self):
-        print("Starting obstacle avoidance program...")
+        print("Starting enhanced obstacle avoidance program...")
         tasks = []
         try:
-            # allow ultrasonic and cliff scanning to run concurrently with movement
+            # Add vision task to existing tasks
+            vision_task = asyncio.create_task(self.vision.capture_and_detect())
             ultrasonic_task = asyncio.create_task(self.ultrasonic_monitoring())
             cliff_task = asyncio.create_task(self.cliff_monitoring())
             movement_task = asyncio.create_task(self.forward_movement())
-            tasks = [ultrasonic_task, cliff_task, movement_task]
+            tasks = [vision_task, ultrasonic_task, cliff_task, movement_task]
             await asyncio.gather(*tasks)
         except asyncio.CancelledError:
             print("\nShutting down gracefully...")
@@ -302,7 +313,7 @@ class AsyncObstacleAvoidance:
             except asyncio.CancelledError:
                 pass
 
-            # reset position on shutdown
+            self.vision.cleanup()
             self.px.forward(0)
             self.px.set_dir_servo_angle(0)
             print("Shutdown complete")
@@ -447,74 +458,8 @@ class VisionSystem:
         self.camera.stop()
         cv2.destroyAllWindows()
 
-
-class EnhancedObstacleAvoidance(AsyncObstacleAvoidance):
-    def __init__(self):
-        super().__init__()
-        self.vision = VisionSystem()
-        self.vision_enabled = True
-
-    async def run(self):
-        print("Starting enhanced obstacle avoidance program...")
-        tasks = []
-        try:
-            # Add vision task to existing tasks
-            vision_task = asyncio.create_task(self.vision.capture_and_detect())
-            ultrasonic_task = asyncio.create_task(self.ultrasonic_monitoring())
-            cliff_task = asyncio.create_task(self.cliff_monitoring())
-            movement_task = asyncio.create_task(self.forward_movement())
-            tasks = [vision_task, ultrasonic_task, cliff_task, movement_task]
-            await asyncio.gather(*tasks)
-        except asyncio.CancelledError:
-            print("\nShutting down gracefully...")
-        finally:
-            for task in tasks:
-                task.cancel()
-            try:
-                await asyncio.gather(*tasks, return_exceptions=True)
-            except asyncio.CancelledError:
-                pass
-
-            self.vision.cleanup()
-            self.px.forward(0)
-            self.px.set_dir_servo_angle(0)
-            print("Shutdown complete")
-
-    async def forward_movement(self):
-        while True:
-            if not self.emergency_stop_flag and not self.current_maneuver:
-                # Check both ultrasonic and vision systems
-                vision_clear = True
-                if self.vision_enabled:
-                    objects = self.vision.get_obstacle_info()
-                    if objects:
-                        print(f"Vision system detected: {[obj['label'] for obj in objects]}")
-                        vision_clear = False
-
-                if (self.current_distance >= self.min_distance and
-                        not self.is_cliff and
-                        vision_clear):
-                    if not self.is_moving:
-                        print("Moving forward...")
-                        self.is_moving = True
-                        self.px.forward(self.speed)
-                else:
-                    if self.is_moving:
-                        if self.is_cliff:
-                            print("Cliff detected!")
-                        elif not vision_clear:
-                            print("Vision system detected obstacle!")
-                        else:
-                            print(f"Ultrasonic detected obstacle at {self.current_distance:.1f}cm")
-                        self.is_moving = False
-                        self.px.forward(0)
-                        self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
-
-            await asyncio.sleep(0.1)
-
-
 def main():
-    avoider = EnhancedObstacleAvoidance()
+    avoider = AsyncObstacleAvoidance()
     try:
         loop = asyncio.get_event_loop()
         runner = loop.create_task(avoider.run())
