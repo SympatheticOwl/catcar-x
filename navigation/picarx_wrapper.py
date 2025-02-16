@@ -12,6 +12,10 @@ class PicarXWrapper:
         self.WHEEL_BASE = 11.7  # Distance between wheels
         self.WHEEL_CIRCUMFERENCE = math.pi * self.WHEEL_DIAMETER
 
+        # Servo Limitations
+        self.MAX_STEERING_ANGLE = 30  # Maximum steering angle in degrees
+        self.MIN_TURN_RADIUS = self.WHEEL_BASE / math.tan(math.radians(self.MAX_STEERING_ANGLE))
+
         # Position tracking
         self.x = 0.0  # cm
         self.y = 0.0  # cm
@@ -52,12 +56,13 @@ class PicarXWrapper:
 
     def _update_position(self, distance, angle):
         """Update position based on distance traveled and steering angle"""
-        # Convert steering angle to radians
+        # Convert steering angle to radians (constrained by max steering angle)
+        angle = max(min(angle, self.MAX_STEERING_ANGLE), -self.MAX_STEERING_ANGLE)
         angle_rad = math.radians(angle)
 
         # Update heading (approximating arc motion)
         if abs(angle) > 1:  # If turning
-            # Approximate turning radius
+            # Calculate actual turning radius based on steering angle
             turning_radius = self.WHEEL_BASE / math.tan(angle_rad)
             # Calculate heading change
             delta_heading = distance / turning_radius
@@ -144,11 +149,57 @@ class PicarXWrapper:
         self.px.set_dir_servo_angle(angle_diff)
         await asyncio.sleep(0.5)  # Allow time for servo to move
 
+    async def execute_turn(self, angle, speed=30):
+        """Execute a turn of the specified angle using a series of small movements"""
+        # Constrain angle to maximum steering angle
+        turn_angle = max(min(angle, self.MAX_STEERING_ANGLE), -self.MAX_STEERING_ANGLE)
+
+        # Set steering angle
+        self.current_angle = turn_angle
+        self.px.set_dir_servo_angle(turn_angle)
+        await asyncio.sleep(0.3)  # Allow servo to settle
+
+        # Calculate arc length needed for this turn
+        # Using approximate turning radius based on steering angle
+        turning_radius = self.WHEEL_BASE / math.tan(math.radians(abs(turn_angle)))
+        angle_rad = math.radians(abs(angle))
+        arc_length = angle_rad * turning_radius
+
+        # Move along the arc
+        await self.move_distance(arc_length, speed)
+
+        # Reset steering
+        self.px.set_dir_servo_angle(0)
+        self.current_angle = 0
+        await asyncio.sleep(0.3)
+
+    async def turn_to_heading(self, target_heading, speed=30):
+        """Turn to a specific heading using multiple small turns if necessary"""
+        while True:
+            # Calculate angle difference
+            current_diff = target_heading - math.degrees(self.heading)
+            # Normalize to [-180, 180]
+            current_diff = ((current_diff + 180) % 360) - 180
+
+            # If we're close enough to target heading, we're done
+            if abs(current_diff) < 5:  # 5 degree tolerance
+                break
+
+            # Determine turn angle for this iteration
+            turn_angle = max(min(current_diff, self.MAX_STEERING_ANGLE), -self.MAX_STEERING_ANGLE)
+
+            # Execute the turn
+            await self.execute_turn(turn_angle, speed)
+
+            # Break if movement was interrupted
+            if self.movement_interrupted:
+                break
+
+            await asyncio.sleep(0.1)
+
     async def navigate_to_goal(self, goal_x, goal_y, speed=30):
         """Navigate to goal coordinates with obstacle avoidance"""
         while True:
-            curr_pos = self.get_position()
-            print(f'Current position: {curr_pos}')
             distance = self.get_distance_to_goal(goal_x, goal_y)
             if distance < self.position_tolerance:
                 print(f"Reached goal: ({self.x:.1f}, {self.y:.1f})")
@@ -157,8 +208,10 @@ class PicarXWrapper:
             # Calculate angle to goal
             angle_to_goal = math.degrees(self.get_angle_to_goal(goal_x, goal_y))
 
-            # Turn towards goal
-            await self.turn_to_angle(angle_to_goal)
+            # First, turn towards goal
+            await self.turn_to_heading(angle_to_goal, speed)
+            if self.movement_interrupted:
+                return False
 
             # Check for obstacles before moving
             distances = await self.scan_avg()
@@ -168,9 +221,10 @@ class PicarXWrapper:
                 self.movement_interrupted = True
                 return False
 
-            # Move towards goal
-            movement_distance = min(distance, 20)  # Move in smaller increments
-            await self.move_distance(movement_distance, speed)
+            # Move towards goal in smaller increments
+            # Calculate movement distance based on turn radius constraints
+            max_movement = min(distance, 20)  # Don't move more than 20cm at a time
+            await self.move_distance(max_movement, speed)
 
             if self.movement_interrupted:
                 print("Movement interrupted by obstacle")
