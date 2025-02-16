@@ -24,7 +24,7 @@ async def main():
             await robot.navigate_to_goal(goal_x, goal_y)
 
             # Get current position after reaching waypoint
-            position = robot.pxw.get_position()
+            position = robot.px.get_position()
             print(f"Current position: ({position['x']:.1f}, {position['y']:.1f})")
             print(f"Current heading: {position['heading']:.1f}°")
 
