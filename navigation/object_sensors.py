@@ -1,6 +1,5 @@
 import time
 from typing import List, Dict
-
 import numpy as np
 import asyncio
 import math
@@ -8,7 +7,6 @@ from world_map import WorldMap
 from picarx_wrapper import PicarXWrapper
 from vision_system import VisionSystem
 from scipy import ndimage
-
 
 class AsyncObstacleAvoidance:
     def __init__(self):

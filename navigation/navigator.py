@@ -15,6 +15,9 @@ def main():
     finally:
         loop.close()
 
+if __name__ == "__main__":
+    main()
+
 # async def main():
 #     px = PicarXWrapper()
 #     await px.navigate_to_point(50, 0)  # Forward 50cm
