@@ -249,6 +249,10 @@ class AsyncObstacleAvoidance:
 
             await asyncio.sleep(0.1)
 
+    async def run_navigation_test(self):
+        # Navigate to point 100cm ahead and 50cm to the right
+        await self.px.navigate_to_point(100, 50)
+
     async def run(self):
         print("Starting enhanced obstacle avoidance program...")
         tasks = []
@@ -257,7 +261,7 @@ class AsyncObstacleAvoidance:
             vision_task = asyncio.create_task(self.vision.capture_and_detect())
             ultrasonic_task = asyncio.create_task(self.ultrasonic_monitoring())
             cliff_task = asyncio.create_task(self.cliff_monitoring())
-            movement_task = asyncio.create_task(self.forward_movement())
+            movement_task = asyncio.create_task(self.run_navigation_test())
             tasks = [vision_task, ultrasonic_task, cliff_task, movement_task]
             await asyncio.gather(*tasks)
         except asyncio.CancelledError:
