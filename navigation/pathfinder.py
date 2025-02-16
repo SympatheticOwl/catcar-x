@@ -25,7 +25,7 @@ class Node:
 
 
 class Pathfinder:
-    def __init__(self, world_map: WorldMap, picar: PicarXWrapper):
+    def __init__(self, world_map, picar):
         self.world_map = world_map
         self.picar = picar
         self.path = []
@@ -87,15 +87,18 @@ class Pathfinder:
         if angle_diff > 180:
             angle_diff = 360 - angle_diff
 
-        # Check if turn is too sharp given minimum turning radius
-        # Simplified check - can be made more precise
-        return angle_diff <= 45  # Maximum 45-degree turn between segments
+        # Increase allowed turn angle to make path finding more flexible
+        return angle_diff <= 60  # Allow up to 60-degree turns
 
     async def find_path(self, start_pos, goal_pos):
         """Find path using A* algorithm"""
         # Convert world coordinates to grid coordinates
         start_grid = self.world_map.world_to_grid(*start_pos)
         goal_grid = self.world_map.world_to_grid(*goal_pos)
+
+        print(f"Planning path from grid: {start_grid} to {goal_grid}")
+        print(f"Current world position: {start_pos}")
+        print(f"Goal world position: {goal_pos}")
 
         start_node = Node(start_grid, g_cost=0)
         start_node.h_cost = self.heuristic(start_grid, goal_grid)
@@ -104,17 +107,34 @@ class Pathfinder:
         open_set = [start_node]
         closed_set = set()
 
-        while open_set:
+        iterations = 0
+        max_iterations = 1000  # Prevent infinite loops
+
+        while open_set and iterations < max_iterations:
+            iterations += 1
             current = min(open_set)
             open_set.remove(current)
 
+            # Debug current position
+            if iterations % 100 == 0:
+                print(f"Exploring node at: {current.position}")
+                print(f"Distance to goal: {self.heuristic(current.position, goal_grid)}")
+
             if current == goal_node:
+                print("Path found!")
                 # Reconstruct path
                 path = []
                 while current:
                     path.append(current)
                     current = current.parent
                 self.path = path[::-1]
+
+                # Debug path
+                print("Path (grid coordinates):")
+                for node in self.path:
+                    world_x, world_y = self.world_map.grid_to_world(*node.position)
+                    print(f"Grid: {node.position}, World: ({world_x:.1f}, {world_y:.1f})")
+
                 return True
 
             closed_set.add(current.position)
@@ -137,7 +157,10 @@ class Pathfinder:
                 neighbor.h_cost = self.heuristic(
                     neighbor.position, goal_grid)
 
-        return False  # No path found
+        print(f"No path found after {iterations} iterations!")
+        print(f"Open set size: {len(open_set)}")
+        print(f"Closed set size: {len(closed_set)}")
+        return False
 
     def get_next_segment(self):
         """Get next path segment to navigate"""

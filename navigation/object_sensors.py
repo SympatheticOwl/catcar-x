@@ -285,27 +285,46 @@ class AsyncObstacleAvoidance:
             pos = self.px.get_position()
             current_x, current_y = pos['x'], pos['y']
 
+            # Print current position and map state
+            print(f"\nCurrent position: ({current_x:.1f}, {current_y:.1f})")
+            print("Current map state:")
+            self.world_map.visualize_map()
+
+            # Check if we're close enough to goal
+            distance_to_goal = math.sqrt((goal_x - current_x) ** 2 + (goal_y - current_y) ** 2)
+            if distance_to_goal < 5:  # 5cm threshold
+                print("Reached goal!")
+                return True
+
             # Scan environment
-            print("Scanning environment...")
+            print("\nScanning environment...")
             await self.scan_environment()
-            # self.world_map.add_padding()
+            self.world_map.add_padding()
 
             # Find path to goal
-            print("Finding path to goal...")
+            print("\nFinding path to goal...")
             path_found = await self.pathfinder.find_path(
                 (current_x, current_y), (goal_x, goal_y))
 
             if not path_found:
-                print("No valid path found!")
-                return False
+                print("No valid path found! Trying with reduced map padding...")
+                # Try reducing padding temporarily
+                self.world_map.padding_size = max(1, self.world_map.padding_size - 1)
+                self.world_map.add_padding()
+                path_found = await self.pathfinder.find_path(
+                    (current_x, current_y), (goal_x, goal_y))
+                self.world_map.padding_size = 2  # Reset padding size
+
+                if not path_found:
+                    return False
 
             # Get next segment endpoint
             next_point = self.pathfinder.get_next_segment()
             if not next_point:
-                print("Reached goal!")
-                return True
+                print("No more segments in path!")
+                return False
 
-            print(f"Navigating to intermediate point: {next_point}")
+            print(f"\nNavigating to intermediate point: {next_point}")
             # Navigate to segment endpoint
             await self.px.navigate_to_point(*next_point)
 
