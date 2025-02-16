@@ -132,7 +132,7 @@ class PicarXWrapper:
                 continue
 
             # Calculate steering angle based on angle difference
-            steering_angle = self._calculate_steering_angle(angle_diff)
+            steering_angle = self.calculate_steering_angle(angle_diff)
             self.set_dir_servo_angle(steering_angle)
 
             # Adjust speed based on turn sharpness
