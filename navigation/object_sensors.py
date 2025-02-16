@@ -368,7 +368,10 @@ class AsyncObstacleAvoidance:
                 # Check if we've reached the target
                 dx = target_x - current_pos['x']
                 dy = target_y - current_pos['y']
+
+                print(f'dx: {dx}, dy: {dy}')
                 distance_to_target = math.sqrt(dx ** 2 + dy ** 2)
+                print(f'distance to target: {distance_to_target:.1f}cm')
                 if distance_to_target < 5:  # 5cm threshold
                     print("Reached target position!")
                     self.px.stop()
@@ -382,6 +385,7 @@ class AsyncObstacleAvoidance:
                     target_x,
                     target_y
                 )
+                print(path)
 
                 # If no path found, perform a scan and retry
                 if not path:

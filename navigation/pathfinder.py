@@ -65,6 +65,8 @@ class Pathfinder:
         open_set: List[Node] = [start_node]
         closed_set: Set[Node] = set()
 
+        print(open_set, closed_set)
+
         while open_set:
             current = heapq.heappop(open_set)
 
@@ -90,6 +92,7 @@ class Pathfinder:
                     if neighbor not in open_set:
                         heapq.heappush(open_set, neighbor)
 
+        print('no path found...')
         return []  # No path found
 
     def _heuristic(self, x1: int, y1: int, x2: int, y2: int) -> float:
