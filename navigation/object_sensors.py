@@ -380,16 +380,6 @@ class AsyncObstacleAvoidance:
             self.is_navigating = False
             raise
 
-    async def navigate_to_target(self, target_x: float, target_y: float):
-        """Navigate to target position using A* pathfinding"""
-        try:
-            success = await self.pathfinder.navigate_to_target(target_x, target_y)
-            if not success:
-                print("Navigation failed - could not find valid path")
-        except asyncio.CancelledError:
-            self.px.stop()
-            raise
-
     async def run(self):
         print("Starting enhanced obstacle avoidance program...")
         tasks = []
