@@ -13,7 +13,7 @@ class NavigationState(Enum):
 
 
 class PicarXNavigator:
-    def __init__(self, tracking_picarx):
+    def __init__(self, tracking_picarx: PicarXWrapper):
         self.px = tracking_picarx
 
         # Navigation constants
@@ -100,6 +100,7 @@ class PicarXNavigator:
 
         # Final position check
         current_pos = self.px.get_position()
+        print(f'current position: {current_pos}')
         dx = self.target_x - current_pos['x']
         dy = self.target_y - current_pos['y']
         final_distance = math.sqrt(dx * dx + dy * dy)
@@ -163,31 +164,27 @@ class PicarXNavigator:
         }
 
 
-# def main():
-#     avoider = AsyncObstacleAvoidance()
-#     try:
-#         loop = asyncio.get_event_loop()
-#         runner = loop.create_task(avoider.run())
-#         loop.run_until_complete(runner)
-#     except KeyboardInterrupt:
-#         print("\nKeyboard interrupt received")
-#         runner.cancel()
-#         loop.run_until_complete(runner)
-#     finally:
-#         loop.close()
-
-async def main():
-    # Initialize tracking-enabled Picarx
-    px = PicarXWrapper()
-    navigator = PicarXNavigator(px)
+def main():
+    avoider = AsyncObstacleAvoidance()
+    navigator = PicarXNavigator(avoider.px)
 
     # Navigate to point (100, 100)
-    navigator.set_target(100, 100)
-    await navigator.execute_path()
+    navigator.set_target(100, 50)
 
-    # Check final state
-    state = navigator.get_state()
-    print(f"Final position: {state['position']}")
+    try:
+        loop = asyncio.get_event_loop()
+        # runner = loop.create_task(avoider.run())
+        runner = loop.create_task(navigator.execute_path())
+        loop.run_until_complete(runner)
+    except KeyboardInterrupt:
+        print("\nKeyboard interrupt received")
+        runner.cancel()
+        loop.run_until_complete(runner)
+    finally:
+        # Check final state
+        state = navigator.get_state()
+        print(f"Final position: {state['position']}")
+        loop.close()
 
 if __name__ == "__main__":
     # main()
