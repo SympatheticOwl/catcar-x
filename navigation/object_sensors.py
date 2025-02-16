@@ -4,7 +4,7 @@ import numpy as np
 import asyncio
 import math
 
-from navigation.pathfinder import Pathfinder
+from pathfinder import Pathfinder
 from world_map import WorldMap
 from picarx_wrapper import PicarXWrapper
 from vision_system import VisionSystem
