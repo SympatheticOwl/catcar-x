@@ -160,7 +160,7 @@ class PicarXWrapper:
 
             # Check for obstacles before moving
             distances = await self.scan_avg()
-            if distances and distances < self.min_obstacle_distance:
+            if distances and sum(distances) / len(distances) < self.min_obstacle_distance:
                 print(f"Obstacle detected at {distances}cm")
                 self.add_obstacle(distances, self.current_angle)
                 self.movement_interrupted = True
