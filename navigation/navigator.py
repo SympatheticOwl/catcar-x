@@ -1,40 +1,23 @@
 import asyncio
 from object_sensors import AsyncObstacleAvoidance
-from picarx_wrapper import PicarXWrapper
 
 async def main():
-    # Initialize the wrapper and obstacle avoidance system
-    px_wrapper = PicarXWrapper()
-    obstacle_system = AsyncObstacleAvoidance(px_wrapper)
+    # Create and run the obstacle avoidance system with a goal
+    controller = AsyncObstacleAvoidance()
 
-    # Start the background tasks
-    system_task = asyncio.create_task(obstacle_system.run())
+    # Set goal coordinates (in cm)
+    goal_x = 100  # 1 meter forward
+    goal_y = 50  # 0.5 meters right
 
     try:
-        # Example navigation sequence
-        goals = [
-            (50, 0),  # Move 50cm forward
-            (50, 50),  # Turn right and move to point
-            (0, 50),  # Move left
-            (0, 0)  # Return to start
-        ]
-
-        for goal_x, goal_y in goals:
-            print(f"\nNavigating to goal: ({goal_x}, {goal_y})")
-            await obstacle_system.navigate_to_goal(goal_x, goal_y)
-            current_pos = px_wrapper.get_position()
-            print(f"Current position: ({current_pos['x']:.1f}, {current_pos['y']:.1f})")
-            await asyncio.sleep(1)  # Pause between goals
-
+        # Run the system with goal coordinates
+        await controller.run(goal_x, goal_y)
     except KeyboardInterrupt:
-        print("\nNavigation interrupted by user")
+        print("\nProgram interrupted by user")
     finally:
-        # Cleanup
-        system_task.cancel()
-        try:
-            await system_task
-        except asyncio.CancelledError:
-            pass
+        # Ensure cleanup
+        controller.px.stop()
+        controller.vision.cleanup()
 
 
 if __name__ == "__main__":
