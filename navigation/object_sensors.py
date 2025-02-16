@@ -201,7 +201,7 @@ class AsyncObstacleAvoidance:
 
             await self.scan_environment()
             # add padding once scanning is done
-            self.world_map.add_padding()
+            # self.world_map.add_padding()
 
             best_angle, max_distance = self.find_best_direction()
 
@@ -288,7 +288,7 @@ class AsyncObstacleAvoidance:
             # Scan environment
             print("Scanning environment...")
             await self.scan_environment()
-            self.world_map.add_padding()
+            # self.world_map.add_padding()
 
             # Find path to goal
             print("Finding path to goal...")
