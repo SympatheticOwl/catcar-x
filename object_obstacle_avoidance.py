@@ -7,6 +7,7 @@ import time
 import math
 from picamera2 import Picamera2
 from picarx import Picarx
+from scipy import ndimage
 
 class AsyncObstacleAvoidance:
     def __init__(self):
@@ -37,11 +38,8 @@ class AsyncObstacleAvoidance:
         map_size = 100
         self.map_size = map_size
         self.map = np.zeros((map_size, map_size))
-        # self.car_pos = np.array([map_size // 2, map_size // 2])  # Start at center
-        self.car_pos = np.array([0, map_size // 2])  # Start at lower center
-        self.car_angle = 0  # Facing positive x-axis
-        self.scan_range = (-60, 60)  # degrees
-        self.scan_step = 5  # degrees
+        self.scan_range = (-60, 60)
+        self.scan_step = 5
 
     def visualize_map(self):
         """Print ASCII visualization of the map"""
@@ -58,16 +56,14 @@ class AsyncObstacleAvoidance:
         return distances
 
     async def scan_environment(self):
-        """Perform a sensor sweep and return scan data"""
         scan_data = []
         start_angle, end_angle = self.scan_range
 
         for angle in range(start_angle, end_angle + 1, self.scan_step):
-            self.px.set_cam_pan_angle(angle)
+            self.px.px.set_cam_pan_angle(angle)
             await asyncio.sleep(0.1)
 
-            distances = await self.scan_avg()
-
+            distances = await self.px.scan_avg()
             if distances:
                 avg_dist = sum(distances) / len(distances)
                 scan_data.append((angle, avg_dist))
@@ -76,8 +72,6 @@ class AsyncObstacleAvoidance:
         return scan_data
 
     def update_map(self, scan_data):
-        """Update internal map with new scan data"""
-        # Clear previous readings
         self.map = np.zeros((self.map_size, self.map_size))
 
         for i in range(len(scan_data) - 1):
@@ -107,7 +101,14 @@ class AsyncObstacleAvoidance:
                             0 <= map_y < self.map_size):
                         self.map[map_y, map_x] = 1
 
-        print("\nCurrent Map:")
+        # Apply padding
+        self.map = ndimage.binary_dilation(
+            self.map,
+            structure=self.padding_structure,
+            iterations=self.padding_size
+        )
+
+        print("\nCurrent Map (with padding):")
         self.visualize_map()
 
     def _polar_to_cartesian(self, angle_deg, distance):
@@ -192,7 +193,7 @@ class AsyncObstacleAvoidance:
             await asyncio.sleep(self.backup_time)
             self.is_backing_up = False
 
-            print(f"Turning to {best_angle}ÃÂ° (clearest path: {max_distance:.1f}cm)")
+            print(f"Turning to {best_angle}° (clearest path: {max_distance:.1f}cm)")
             self.px.set_dir_servo_angle(best_angle)
             self.px.forward(self.speed)
             await asyncio.sleep(self.turn_time)

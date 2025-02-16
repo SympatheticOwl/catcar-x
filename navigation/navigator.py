@@ -1,24 +1,20 @@
 import asyncio
 from object_sensors import AsyncObstacleAvoidance
 
-async def main():
-    # Create and run the obstacle avoidance system with a goal
-    controller = AsyncObstacleAvoidance()
-
-    # Set goal coordinates (in cm)
-    goal_x = 100  # 1 meter forward
-    goal_y = 50  # 0.5 meters right
-
+def main():
+    avoider = AsyncObstacleAvoidance()
     try:
-        # Run the system with goal coordinates
-        await controller.run(goal_x, goal_y)
+        loop = asyncio.get_event_loop()
+        runner = loop.create_task(avoider.run())
+        loop.run_until_complete(runner)
     except KeyboardInterrupt:
-        print("\nProgram interrupted by user")
+        print("\nKeyboard interrupt received")
+        runner.cancel()
+        loop.run_until_complete(runner)
     finally:
-        # Ensure cleanup
-        controller.px.stop()
-        controller.vision.cleanup()
+        loop.close()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
+
