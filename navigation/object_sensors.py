@@ -56,6 +56,8 @@ class AsyncObstacleAvoidance:
             dist = self.px.px.ultrasonic.read()
             if dist and 0 < dist < 300:
                 distances.append(dist)
+            else:
+                distances.append(300)
             await asyncio.sleep(0.01)
         return distances
 
