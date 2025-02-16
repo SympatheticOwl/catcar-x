@@ -23,20 +23,18 @@ class AsyncObstacleAvoidance:
         self.is_moving = False
         self.current_maneuver = None
         self.emergency_stop_flag = False
-        self.is_backing_up = False  # since this is async we don't want to interrupt evasive backup maneuvers while obejcts are still too close
+        self.is_backing_up = False
         self.is_cliff = False
+        self.navigation_task = None
 
         # vision
         self.vision = VisionSystem()
         self.vision_enabled = True
         self.vision_clear = True
 
-        # scanning parameters
-        map_size = 100
-        self.map_size = map_size
-        self.map = np.zeros((map_size, map_size))
-        self.scan_range = (-60, 60)
-        self.scan_step = 5
+        # navigation goals
+        self.waypoints = []
+        self.current_waypoint = None
 
     def visualize_map(self):
         """Print ASCII visualization of the map"""
@@ -51,6 +49,45 @@ class AsyncObstacleAvoidance:
                 distances.append(dist)
             await asyncio.sleep(0.01)
         return distances
+
+    async def navigate_to_waypoint(self, x: float, y: float):
+        """Navigate to a waypoint while avoiding obstacles"""
+        try:
+            self.current_waypoint = (x, y)
+            reached_target = await self.px.move_to_target(x, y, self.speed)
+
+            if reached_target:
+                print(f"Reached waypoint ({x}, {y})")
+            else:
+                print(f"Navigation to ({x}, {y}) was interrupted")
+
+            return reached_target
+
+        except asyncio.CancelledError:
+            print("Navigation cancelled")
+            raise
+
+    async def navigate_waypoints(self, waypoints):
+        """Navigate through a series of waypoints"""
+        self.waypoints = waypoints
+
+        for x, y in waypoints:
+            print(f"Navigating to waypoint ({x}, {y})")
+
+            while True:
+                if self.emergency_stop_flag:
+                    await asyncio.sleep(0.1)
+                    continue
+
+                # Attempt to reach waypoint
+                reached = await self.navigate_to_waypoint(x, y)
+
+                if reached:
+                    break
+                else:
+                    # If interrupted by obstacle, wait for evasive maneuver to complete
+                    while self.current_maneuver:
+                        await asyncio.sleep(0.1)
 
     async def scan_environment(self):
         scan_data = []
@@ -147,15 +184,22 @@ class AsyncObstacleAvoidance:
             await asyncio.sleep(self.sensor_read_freq)
 
     async def emergency_stop(self):
+        """Emergency stop with current position tracking"""
         self.emergency_stop_flag = True
-        # cancel any ongoing maneuver except backup
-        if self.current_maneuver:
-            self.current_maneuver.cancel()
 
-        self.is_moving = False
-        self.px.forward(0)
-        self.px.set_dir_servo_angle(0)
+        # Cancel any ongoing navigation
+        if self.navigation_task:
+            self.navigation_task.cancel()
+            try:
+                await self.navigation_task
+            except asyncio.CancelledError:
+                pass
+            self.navigation_task = None
+
+        # Stop movement
+        await self.px.stop()
         await asyncio.sleep(0.5)
+
         self.emergency_stop_flag = False
         self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
 
@@ -172,42 +216,32 @@ class AsyncObstacleAvoidance:
         return best_angle, max_distance
 
     async def evasive_maneuver(self):
+        """Evasive maneuver with position tracking"""
         try:
-            self.is_moving = False
-            self.px.forward(0)
-            await asyncio.sleep(0.5)
+            current_x, current_y, _ = self.px.get_position()
 
+            # Scan environment
             scan_data = await self.scan_environment()
             self.update_map(scan_data)
-
             best_angle, max_distance = self.find_best_direction(scan_data)
 
-            # normal evasive maneuver
+            # Back up while tracking position
             print("Backing up...")
-            self.is_moving = True
             self.is_backing_up = True
-            self.px.backward(self.speed)
-            await asyncio.sleep(self.backup_time)
+            await self.px.forward_distance(-20, self.speed)  # Back up 20cm
             self.is_backing_up = False
 
+            # Turn toward best direction
             print(f"Turning to {best_angle}° (clearest path: {max_distance:.1f}cm)")
-            self.px.set_dir_servo_angle(best_angle)
-            self.px.forward(self.speed)
-            await asyncio.sleep(self.turn_time)
+            await self.px.turn_to_heading(best_angle)
 
+            # Move forward a bit
             if not self.emergency_stop_flag:
-                self.px.set_dir_servo_angle(0)
-                self.is_moving = True
-                self.px.forward(self.speed)
-
-            self.px.set_dir_servo_angle(0)
+                await self.px.forward_distance(20, self.speed)  # Move forward 20cm
 
         except asyncio.CancelledError:
-            self.px.forward(0)
-            self.px.set_dir_servo_angle(0)
-            self.is_moving = False
+            await self.px.stop()
             raise
-
         finally:
             self.current_maneuver = None
 
@@ -246,16 +280,30 @@ class AsyncObstacleAvoidance:
             await asyncio.sleep(0.1)
 
     async def run(self):
-        print("Starting enhanced obstacle avoidance program...")
+        """Main run loop with waypoint navigation"""
+        print("Starting enhanced obstacle avoidance with position tracking...")
         tasks = []
         try:
-            # Add vision task to existing tasks
+            # Example waypoints (modify as needed)
+            waypoints = [
+                (100, 0),  # 1 meter forward
+                (100, 100),  # Turn right and go 1 meter
+                (0, 100),  # Return to starting Y
+                (0, 0)  # Return to start
+            ]
+
+            # Create all monitoring tasks
             vision_task = asyncio.create_task(self.vision.capture_and_detect())
             ultrasonic_task = asyncio.create_task(self.ultrasonic_monitoring())
             cliff_task = asyncio.create_task(self.cliff_monitoring())
-            movement_task = asyncio.create_task(self.forward_movement(10, 0))
-            tasks = [vision_task, ultrasonic_task, cliff_task, movement_task]
+
+            # Create navigation task
+            self.navigation_task = asyncio.create_task(self.navigate_waypoints(waypoints))
+
+            # Gather all tasks
+            tasks = [vision_task, ultrasonic_task, cliff_task, self.navigation_task]
             await asyncio.gather(*tasks)
+
         except asyncio.CancelledError:
             print("\nShutting down gracefully...")
         finally:
@@ -267,6 +315,5 @@ class AsyncObstacleAvoidance:
                 pass
 
             self.vision.cleanup()
-            self.px.forward(0)
-            self.px.set_dir_servo_angle(0)
+            await self.px.stop()
             print("Shutdown complete")
