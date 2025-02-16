@@ -1,9 +1,7 @@
 import asyncio
 import math
 import time
-import asyncio
 from picarx import Picarx
-
 
 class PicarXWrapper:
     def __init__(self):
@@ -103,6 +101,45 @@ class PicarXWrapper:
         self.current_steering_angle = max(-self.MAX_STEERING_ANGLE,
                                           min(self.MAX_STEERING_ANGLE, angle))
         self.px.set_dir_servo_angle(self.current_steering_angle)
+
+    async def navigate_to_point(self, target_x, target_y, speed=30):
+        """Navigate to a target point while accounting for turning radius"""
+        while True:
+            # Calculate distance and angle to target
+            dx = target_x - self.x
+            dy = target_y - self.y
+            print(f'self.x: {self.x}, self.y: {self.y}')
+            print(f'target.x: {self.x}, target.y: {self.y}')
+            distance_to_target = math.sqrt(dx ** 2 + dy ** 2)
+
+            # If we're close enough to target, stop
+            if distance_to_target < 5:  # 5cm threshold
+                self.stop()
+                return True
+
+            # Calculate target angle in degrees
+            target_angle = math.degrees(math.atan2(dy, dx))
+
+            # Calculate angle difference
+            angle_diff = target_angle - self.heading
+            # Normalize to -180 to 180
+            angle_diff = (angle_diff + 180) % 360 - 180
+
+            # If we need to turn more than 45 degrees, stop and turn first
+            if abs(angle_diff) > 45:
+                self.stop()
+                await self.turn_to_heading(target_angle)
+                continue
+
+            # Calculate steering angle based on angle difference
+            steering_angle = self._calculate_steering_angle(angle_diff)
+            self.set_dir_servo_angle(steering_angle)
+
+            # Adjust speed based on turn sharpness
+            adjusted_speed = speed * (1 - abs(steering_angle) / (2 * self.MAX_STEERING_ANGLE))
+            self.forward(adjusted_speed)
+
+            await asyncio.sleep(0.1)
 
     async def turn_to_heading(self, target_heading, speed=30):
         """Turn to a specific heading"""
