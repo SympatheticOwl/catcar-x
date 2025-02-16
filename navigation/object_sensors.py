@@ -318,15 +318,24 @@ class AsyncObstacleAvoidance:
                                 await asyncio.sleep(3)
 
                 # Check ultrasonic sensor data
-                if self.current_distance < self.min_distance:
+                if self.current_distance <= self.min_distance:
                     print(f"Obstacle detected at {self.current_distance}cm!")
                     self.px.stop()
                     self.is_moving = False
 
                     # Perform emergency backup and scan
                     print("Backing up and scanning environment...")
-                    await self.evasive_maneuver()
+                    self.is_moving = False
+                    self.px.forward(0)
+                    self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
                     continue
+
+                # Periodically visualize the map (for debugging)
+                if time.time() % 5 < 0.1:  # Every 5 seconds
+                    print("\nCurrent World Map:")
+                    self.world_map.visualize_map()
+                    pos = self.px.get_position()
+                    print(f"Position: x={pos['x']:.1f}, y={pos['y']:.1f}, heading={pos['heading']:.1f}°")
 
                 # Find path to target
                 path = self.pathfinder.find_path(
