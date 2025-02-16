@@ -89,6 +89,8 @@ class PicarXNavigator:
         self.state = NavigationState.IDLE
 
         while self.current_segment < len(self.path_segments):
+            current_pos = self.px.get_position()
+            print(f'current position: {current_pos}')
             segment = self.path_segments[self.current_segment]
 
             if segment['type'] == 'turn':
