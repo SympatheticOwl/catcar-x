@@ -8,7 +8,7 @@ from picarx_wrapper import PicarXWrapper
 
 class AsyncObstacleAvoidance:
     def __init__(self):
-        self.px = PicarXWrapper()
+        self.pxw = PicarXWrapper()
 
         # configuration parameters
         self.min_distance = 15
@@ -54,7 +54,7 @@ class AsyncObstacleAvoidance:
     async def scan_avg(self):
         distances = []
         for _ in range(3):
-            dist = self.px.px.ultrasonic.read()
+            dist = self.pxw.px.ultrasonic.read()
             if dist and 0 < dist < 300:
                 distances.append(dist)
             await asyncio.sleep(0.01)
@@ -66,7 +66,7 @@ class AsyncObstacleAvoidance:
         start_angle, end_angle = self.scan_range
 
         for angle in range(start_angle, end_angle + 1, self.scan_step):
-            self.pxw.px.set_cam_pan_angle(angle)
+            self.pxw.pxw.set_cam_pan_angle(angle)
             await asyncio.sleep(0.1)
 
             distances = await self.scan_avg()
@@ -74,7 +74,7 @@ class AsyncObstacleAvoidance:
                 avg_dist = sum(distances) / len(distances)
                 scan_data.append((angle, avg_dist))
 
-        self.pxw.px.set_cam_pan_angle(0)
+        self.pxw.pxw.set_cam_pan_angle(0)
         return scan_data
 
     def update_map(self, scan_data):
@@ -119,7 +119,7 @@ class AsyncObstacleAvoidance:
                     print(f"Distance: {self.current_distance:.1f} cm")
 
                     if (self.current_distance < self.min_distance and
-                            self.px.is_moving and
+                            self.pxw.is_moving and
                             not self.emergency_stop_flag):
                         print(f"Emergency stop! Object detected at {self.current_distance:.1f}cm")
                         await self.emergency_stop()
@@ -132,10 +132,10 @@ class AsyncObstacleAvoidance:
     async def cliff_monitoring(self):
         while True:
             if not self.emergency_stop_flag:
-                self.is_cliff = self.px.px.get_cliff_status(self.px.px.get_grayscale_data())
+                self.is_cliff = self.pxw.pxw.get_cliff_status(self.pxw.px.get_grayscale_data())
 
                 if (self.is_cliff and
-                        self.px.is_moving and
+                        self.pxw.is_moving and
                         not self.emergency_stop_flag):
                     print(f"Emergency stop, cliff detected!")
                     await self.emergency_stop()
@@ -155,7 +155,7 @@ class AsyncObstacleAvoidance:
             self.current_maneuver.cancel()
             self.current_maneuver = None
 
-        self.px.stop()
+        self.pxw.stop()
         await asyncio.sleep(0.5)
 
         self.emergency_stop_flag = False
@@ -187,7 +187,7 @@ class AsyncObstacleAvoidance:
     async def evasive_maneuver(self):
         """Evasive maneuver that can be interrupted"""
         try:
-            self.px.stop()
+            self.pxw.stop()
             await asyncio.sleep(0.5)
 
             scan_data = await self.scan_environment()
@@ -198,13 +198,13 @@ class AsyncObstacleAvoidance:
             backup_start = asyncio.get_event_loop().time()
 
             # Interruptible backup movement
-            self.px.px.backward(self.speed)
+            self.pxw.px.backward(self.speed)
             while (asyncio.get_event_loop().time() - backup_start) < self.backup_time:
                 if self.emergency_stop_flag:
                     break
                 await asyncio.sleep(0.1)
 
-            self.px.stop()
+            self.pxw.stop()
             self.is_backing_up = False
 
             if not self.emergency_stop_flag:
@@ -217,12 +217,12 @@ class AsyncObstacleAvoidance:
                         best_angle = angle
 
                 print(f"Turning to {best_angle}° (clearest path: {max_distance:.1f}cm)")
-                await self.px.turn_to_angle(best_angle)
+                await self.pxw.turn_to_angle(best_angle)
 
             self.navigation_paused = False
 
         except asyncio.CancelledError:
-            self.px.stop()
+            self.pxw.stop()
             self.is_backing_up = False
             raise
         finally:
@@ -272,7 +272,7 @@ class AsyncObstacleAvoidance:
                     await asyncio.sleep(0.1)
                     continue
 
-                success = await self.px.navigate_to_goal(goal_x, goal_y, self.speed)
+                success = await self.pxw.navigate_to_goal(goal_x, goal_y, self.speed)
                 if success:
                     print(f"Reached goal: ({goal_x}, {goal_y})")
                     self.current_goal = None
@@ -290,7 +290,7 @@ class AsyncObstacleAvoidance:
                 await asyncio.sleep(0.1)
 
         except asyncio.CancelledError:
-            self.px.stop()
+            self.pxw.stop()
             self.current_goal = None
             self.navigation_active = False
             raise
@@ -316,5 +316,5 @@ class AsyncObstacleAvoidance:
                 pass
 
             self.vision.cleanup()
-            self.px.stop()
+            self.pxw.stop()
             print("Shutdown complete")
