@@ -15,7 +15,7 @@ class WorldMap:
         self.resolution = resolution
         self.grid_size = int(map_size / resolution)
         self.grid = np.zeros((self.grid_size, self.grid_size), dtype=np.uint8)
-        self.origin = np.array([self.grid_size // 2, self.grid_size // 2])
+        self.origin = np.array([0, 0])
 
         # Obstacle tracking
         self.obstacles = {}  # Track individual obstacles
