@@ -203,7 +203,7 @@ class AsyncObstacleAvoidance:
             self.navigation_task = None
 
         # Stop movement
-        await self.px.stop()
+        self.px.stop()
         await asyncio.sleep(0.5)
 
         self.emergency_stop_flag = False
@@ -234,19 +234,25 @@ class AsyncObstacleAvoidance:
             # Back up while tracking position
             print("Backing up...")
             self.is_backing_up = True
-            await self.px.forward_distance(-20, self.speed)  # Back up 20cm
+            await self.px.forward(-self.speed)  # Back up 20cm
+            await asyncio.sleep(self.backup_time)
             self.is_backing_up = False
+            self.px.forward(0)
 
             # Turn toward best direction
             print(f"Turning to {best_angle}° (clearest path: {max_distance:.1f}cm)")
-            await self.px.turn_to_heading(best_angle)
+            self.px.set_dir_servo_angle(best_angle)
+            self.px.forward(self.speed)
+            await asyncio.sleep(self.turn_time)
 
-            # Move forward a bit
             if not self.emergency_stop_flag:
-                await self.px.forward_distance(20, self.speed)  # Move forward 20cm
+                self.px.set_dir_servo_angle(0)
+                self.is_moving = True
+                self.px.forward(self.speed)
 
+            self.px.set_dir_servo_angle(0)
         except asyncio.CancelledError:
-            await self.px.stop()
+            self.px.stop()
             raise
         finally:
             self.current_maneuver = None
