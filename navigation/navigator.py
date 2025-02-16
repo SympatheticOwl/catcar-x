@@ -190,4 +190,5 @@ async def main():
     print(f"Final position: {state['position']}")
 
 if __name__ == "__main__":
-    main()
+    # main()
+    asyncio.run(main())
