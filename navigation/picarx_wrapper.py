@@ -1,8 +1,8 @@
 import asyncio
 import math
 import time
+import asyncio
 from picarx import Picarx
-import threading
 
 class PicarXWrapper:
     def __init__(self):
@@ -76,7 +76,7 @@ class PicarXWrapper:
 
             self.last_position_update = current_time
             # await asyncio.sleep(0.05)  # Update at 20Hz
-            time.sleep(0.05)  # Update at 20Hz
+            await asyncio.sleep(0.05)  # Update at 20Hz
 
     def forward(self, speed):
         """Move forward with speed tracking"""
