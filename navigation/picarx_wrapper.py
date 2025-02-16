@@ -42,15 +42,24 @@ class PicarXWrapper:
         self.x += distance * math.sin(heading_rad)  # East is positive X
         self.y += distance * math.cos(heading_rad)  # North is positive Y
 
+    def scan_avg(self):
+        distances = []
+        for _ in range(3):
+            dist = self.px.px.ultrasonic.read()
+            if dist and 0 < dist < 300:  # Filter invalid readings
+                distances.append(dist)
+            time.sleep(0.01)
+        return distances
+
     def check_path_clear(self, distance: float) -> bool:
         """Check if path is clear for given distance"""
-        ultrasonic_reading = self.px.ultrasonic.read()
-        if ultrasonic_reading is None:
+        distances = self.scan_avg()
+        if distances is None:
             return False
 
         # Convert intended movement distance to cm for comparison
         distance_cm = distance * 30.48  # feet to cm
-        return ultrasonic_reading > min(distance_cm, self.min_safe_distance)
+        return (sum(distances)/len(distances)) > min(distance_cm, self.min_safe_distance)
 
     async def move_distance(self, distance: float) -> bool:
         """
