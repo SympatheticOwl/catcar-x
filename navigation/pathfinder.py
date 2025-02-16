@@ -31,7 +31,7 @@ class Node:
         return hash((self.x, self.y, self.heading))
 
 class Pathfinder:
-    def __init__(self, world_map: 'WorldMap', picar: 'PicarXWrapper'):
+    def __init__(self, world_map: WorldMap, picar: PicarXWrapper):
         self.world_map = world_map
         self.picar = picar
 
