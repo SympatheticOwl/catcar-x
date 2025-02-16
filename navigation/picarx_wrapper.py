@@ -2,6 +2,7 @@ import asyncio
 import math
 import time
 from picarx import Picarx
+import threading
 
 class PicarXWrapper:
     def __init__(self):
@@ -33,15 +34,15 @@ class PicarXWrapper:
         self.NINETY_DEG_TURN_TIME = 2.5  # Time to complete a 90-degree turn
         self.TURN_RATE = 90 / self.NINETY_DEG_TURN_TIME  # degrees per second at max steering
 
-        track_task = asyncio.create_task(self._continuous_position_tracking())
-        asyncio.run(track_task)
+        track_thread = threading.Thread(target=self._continuous_position_tracking(), name="pos_tracker")
+        track_thread.start()
 
     def _speed_to_cm_per_sec(self, speed_value):
         """Convert motor speed value to cm/s"""
         rpm = (abs(speed_value) / self.MAX_MOTOR_SPEED) * self.MAX_RPM
         return (rpm * self.WHEEL_CIRCUMFERENCE) / 60
 
-    async def _continuous_position_tracking(self):
+    def _continuous_position_tracking(self):
         """Continuously update position based on movement"""
         while True:
             current_time = time.time()
@@ -77,7 +78,8 @@ class PicarXWrapper:
                     self.y += distance * math.sin(heading_rad)
 
             self.last_position_update = current_time
-            await asyncio.sleep(0.05)  # Update at 20Hz
+            # await asyncio.sleep(0.05)  # Update at 20Hz
+            time.sleep(0.05)  # Update at 20Hz
 
     def forward(self, speed):
         """Move forward with speed tracking"""
