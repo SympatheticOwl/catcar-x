@@ -289,11 +289,7 @@ class AsyncObstacleAvoidance:
                     self._update_vision_detections(objects)
 
             # Get ultrasonic reading and update map
-            distances = await self.scan_avg()
-            if distances:
-                self.current_distance = sum(distances) / len(distances)
-                if self.current_distance < 300:  # Valid reading threshold
-                    self._update_ultrasonic_detection(self.current_distance)
+            await self.scan_avg()
 
             # Find path using A* pathfinder
             path = self.pathfinder.find_path(
