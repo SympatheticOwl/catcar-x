@@ -385,7 +385,7 @@ class AsyncObstacleAvoidance:
                     target_x,
                     target_y
                 )
-                print(path)
+                print(f'path: {path}')
 
                 # If no path found, perform a scan and retry
                 if not path:

@@ -65,10 +65,12 @@ class Pathfinder:
         open_set: List[Node] = [start_node]
         closed_set: Set[Node] = set()
 
-        print(open_set, closed_set)
+        print(f'open_set: {open_set}, closed_set: {closed_set}')
 
         while open_set:
+            print('open...')
             current = heapq.heappop(open_set)
+            print(f'current: {current}')
 
             # Check if we've reached the goal (within threshold)
             if self._is_goal(current, goal_grid_x, goal_grid_y):
