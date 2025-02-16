@@ -44,11 +44,12 @@ class AsyncObstacleAvoidance:
         self.vision_clear = True
 
         # scanning parameters
-        map_size = 100
-        # self.map_size = map_size
-        # self.map = np.zeros((map_size, map_size))
         self.scan_range = (-60, 60)
         self.scan_step = 5
+
+        self.navigation_target = None
+        self.navigation_task = None
+        self.is_navigating = False
 
     def _update_ultrasonic_detection(self, distance: float):
         """Update map with obstacle detected by ultrasonic sensor"""
@@ -275,38 +276,140 @@ class AsyncObstacleAvoidance:
 
             await asyncio.sleep(0.1)
 
-    async def navigate_to_point(self, target_x: float, target_y: float, speed: int = 30):
-        """Navigate to a target point while avoiding obstacles"""
-        while True:
-            # Get current position
-            current_pos = self.px.get_position()
-            print(f'Current position: x={current_pos["x"]:.1f}, y={current_pos["y"]:.1f}, '
-                  f'heading={current_pos["heading"]:.1f}°')
+    # async def navigate_to_point(self, target_x: float, target_y: float, speed: int = 30):
+    #     """Navigate to a target point while avoiding obstacles"""
+    #     while True:
+    #         # Get current position
+    #         current_pos = self.px.get_position()
+    #         print(f'Current position: x={current_pos["x"]:.1f}, y={current_pos["y"]:.1f}, '
+    #               f'heading={current_pos["heading"]:.1f}°')
+    #
+    #         # Update world map with sensor data
+    #         if self.vision_enabled:
+    #             objects = self.vision.get_obstacle_info()
+    #             if objects:
+    #                 self._update_vision_detections(objects)
+    #
+    #         # Get ultrasonic reading and update map
+    #         await self.scan_avg()
+    #
+    #         # Find path using A* pathfinder
+    #         path = self.pathfinder.find_path(
+    #             start_x=current_pos['x'],
+    #             start_y=current_pos['y'],
+    #             start_heading=current_pos['heading'],
+    #             goal_x=target_x,
+    #             goal_y=target_y
+    #         )
+    #
+    #         if not path:
+    #             print("No valid path found! Performing environment scan...")
+    #             await self.scan_environment()
+    #             self.world_map.add_padding()  # Ensure padding is updated
+    #
+    #             # Try path planning again
+    #             path = self.pathfinder.find_path(
+    #                 start_x=current_pos['x'],
+    #                 start_y=current_pos['y'],
+    #                 start_heading=current_pos['heading'],
+    #                 goal_x=target_x,
+    #                 goal_y=target_y
+    #             )
+    #
+    #             if not path:
+    #                 print("Still no valid path found. Stopping.")
+    #                 self.px.stop()
+    #                 return False
+    #
+    #         # Get next waypoint from path
+    #         # Path contains (x, y, heading) tuples
+    #         next_waypoint = path[1] if len(path) > 1 else path[0]
+    #         next_x, next_y, target_heading = next_waypoint
+    #
+    #         # Calculate distance to final target
+    #         dx = target_x - current_pos['x']
+    #         dy = target_y - current_pos['y']
+    #         distance_to_target = math.sqrt(dx * dx + dy * dy)
+    #
+    #         # If we're close enough to target, stop
+    #         if distance_to_target < 5:  # 5cm threshold
+    #             self.px.stop()
+    #             return True
+    #
+    #         # Use PicarX's built-in navigation to next waypoint
+    #         try:
+    #             await self.px.navigate_to_point(next_x, next_y, speed)
+    #         except asyncio.CancelledError:
+    #             self.px.stop()
+    #             raise
+    #         except Exception as e:
+    #             print(f"Navigation error: {e}")
+    #             self.px.stop()
+    #             # If navigation fails, we'll retry with a new path in the next loop
+    #
+    #         # Visualize current state periodically
+    #         if time.time() % 5 < 0.1:  # Every 5 seconds
+    #             print("\nCurrent World Map:")
+    #             self.world_map.visualize_map()
+    #             print(f"Next waypoint: ({next_x:.1f}, {next_y:.1f}, {target_heading:.1f}°)")
+    #             print(f"Distance to target: {distance_to_target:.1f}cm")
+    #
+    #         await asyncio.sleep(0.1)
 
-            # Update world map with sensor data
-            if self.vision_enabled:
-                objects = self.vision.get_obstacle_info()
-                if objects:
-                    self._update_vision_detections(objects)
+    async def start_navigation(self, target_x: float, target_y: float):
+        """Start navigation to a target point"""
+        print(f"Starting navigation to target: ({target_x}, {target_y})")
+        self.navigation_target = (target_x, target_y)
+        self.is_navigating = True
 
-            # Get ultrasonic reading and update map
-            await self.scan_avg()
+        if self.navigation_task:
+            self.navigation_task.cancel()
+            try:
+                await self.navigation_task
+            except asyncio.CancelledError:
+                pass
 
-            # Find path using A* pathfinder
-            path = self.pathfinder.find_path(
-                start_x=current_pos['x'],
-                start_y=current_pos['y'],
-                start_heading=current_pos['heading'],
-                goal_x=target_x,
-                goal_y=target_y
-            )
+        self.navigation_task = asyncio.create_task(self._navigation_loop())
 
-            if not path:
-                print("No valid path found! Performing environment scan...")
-                await self.scan_environment()
-                self.world_map.add_padding()  # Ensure padding is updated
+    async def stop_navigation(self):
+        """Stop current navigation"""
+        self.is_navigating = False
+        if self.navigation_task:
+            self.navigation_task.cancel()
+            try:
+                await self.navigation_task
+            except asyncio.CancelledError:
+                pass
+        self.px.stop()
+        print("Navigation stopped")
 
-                # Try path planning again
+    async def _navigation_loop(self):
+        """Main navigation loop"""
+        if not self.navigation_target:
+            print("No navigation target set")
+            return
+
+        target_x, target_y = self.navigation_target
+        try:
+            while self.is_navigating:
+                # Get current position
+                current_pos = self.px.get_position()
+                print(f'Current position: x={current_pos["x"]:.1f}, y={current_pos["y"]:.1f}, '
+                      f'heading={current_pos["heading"]:.1f}°')
+
+                # Calculate distance to target
+                dx = target_x - current_pos['x']
+                dy = target_y - current_pos['y']
+                distance_to_target = math.sqrt(dx * dx + dy * dy)
+
+                # Check if we've reached the target
+                if distance_to_target < 5:  # 5cm threshold
+                    print("Reached target!")
+                    self.px.stop()
+                    self.is_navigating = False
+                    break
+
+                # Find path using A* pathfinder
                 path = self.pathfinder.find_path(
                     start_x=current_pos['x'],
                     start_y=current_pos['y'],
@@ -316,44 +419,51 @@ class AsyncObstacleAvoidance:
                 )
 
                 if not path:
-                    print("Still no valid path found. Stopping.")
-                    self.px.stop()
-                    return False
+                    print("No valid path found! Performing environment scan...")
+                    await self.scan_environment()
+                    self.world_map.add_padding()
 
-            # Get next waypoint from path
-            # Path contains (x, y, heading) tuples
-            next_waypoint = path[1] if len(path) > 1 else path[0]
-            next_x, next_y, target_heading = next_waypoint
+                    # Try path planning again
+                    path = self.pathfinder.find_path(
+                        start_x=current_pos['x'],
+                        start_y=current_pos['y'],
+                        start_heading=current_pos['heading'],
+                        goal_x=target_x,
+                        goal_y=target_y
+                    )
 
-            # Calculate distance to final target
-            dx = target_x - current_pos['x']
-            dy = target_y - current_pos['y']
-            distance_to_target = math.sqrt(dx * dx + dy * dy)
+                    if not path:
+                        print("Still no valid path found. Stopping navigation.")
+                        await self.stop_navigation()
+                        break
 
-            # If we're close enough to target, stop
-            if distance_to_target < 5:  # 5cm threshold
-                self.px.stop()
-                return True
+                # Follow the path
+                next_waypoint = path[1] if len(path) > 1 else path[0]
+                next_x, next_y, target_heading = next_waypoint
 
-            # Use PicarX's built-in navigation to next waypoint
-            try:
-                await self.px.navigate_to_point(next_x, next_y, speed)
-            except asyncio.CancelledError:
-                self.px.stop()
-                raise
-            except Exception as e:
-                print(f"Navigation error: {e}")
-                self.px.stop()
-                # If navigation fails, we'll retry with a new path in the next loop
+                try:
+                    await self.px.navigate_to_point(next_x, next_y, speed=30)
+                except Exception as e:
+                    print(f"Navigation error: {e}")
+                    continue
 
-            # Visualize current state periodically
-            if time.time() % 5 < 0.1:  # Every 5 seconds
-                print("\nCurrent World Map:")
-                self.world_map.visualize_map()
-                print(f"Next waypoint: ({next_x:.1f}, {next_y:.1f}, {target_heading:.1f}°)")
-                print(f"Distance to target: {distance_to_target:.1f}cm")
+                # Visualize current state
+                if time.time() % 5 < 0.1:
+                    print("\nCurrent World Map:")
+                    self.world_map.visualize_map()
+                    print(f"Next waypoint: ({next_x:.1f}, {next_y:.1f}, {target_heading:.1f}°)")
+                    print(f"Distance to target: {distance_to_target:.1f}cm")
 
-            await asyncio.sleep(0.1)
+                await asyncio.sleep(0.1)
+
+        except asyncio.CancelledError:
+            print("Navigation cancelled")
+            self.px.stop()
+            raise
+        except Exception as e:
+            print(f"Navigation error: {e}")
+            self.px.stop()
+            self.is_navigating = False
 
     async def run(self):
         print("Starting enhanced obstacle avoidance program...")
@@ -366,8 +476,13 @@ class AsyncObstacleAvoidance:
             cliff_task = asyncio.create_task(self.cliff_monitoring())
             # movement_task = asyncio.create_task(self.forward_movement())
             # navigation_task = asyncio.create_task(self.navigate_with_path_planning(50, 50))
-            navigation_task = asyncio.create_task(self.navigate_to_point(100, 50))
-            tasks = [pos_track_task, vision_task, ultrasonic_task, cliff_task, navigation_task]
+            # navigation_task = asyncio.create_task(self.navigate_to_point(100, 50))
+            tasks = [pos_track_task, vision_task, ultrasonic_task, cliff_task]
+
+            # Start initial navigation if needed
+            await self.start_navigation(100, 50)  # Example target point
+
+            # Wait for all tasks
             await asyncio.gather(*tasks)
         except asyncio.CancelledError:
             print("\nShutting down gracefully...")

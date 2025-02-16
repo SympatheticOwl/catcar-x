@@ -30,6 +30,7 @@ class Node:
     def __hash__(self):
         return hash((self.x, self.y, self.heading))
 
+
 class Pathfinder:
     def __init__(self, world_map: WorldMap, picar: PicarXWrapper):
         self.world_map = world_map
@@ -182,16 +183,3 @@ class Pathfinder:
             current = current.parent
 
         return list(reversed(path))  # Return path from start to goal
-
-
-async def execute_path(picar: PicarXWrapper, path: List[Tuple[float, float, float]]):
-    """Execute a path found by the pathfinder"""
-    if not path:
-        print("No path to execute")
-        return
-
-    for x, y, heading in path:
-        print(f"Moving to point: ({x:.1f}, {y:.1f}, {heading:.1f}°)")
-        await picar.navigate_to_point(x, y, speed=30)
-        # Optional: Add small delay between waypoints
-        await asyncio.sleep(0.1)
