@@ -97,8 +97,8 @@ class AsyncObstacleAvoidance:
 
             # Calculate object position in world coordinates
             camera_angle_rad = math.radians(self.px.heading)
-            camera_x = self.px.x + self.CAMERA_OFFSET_X * math.cos(camera_angle_rad)
-            camera_y = self.px.y + self.CAMERA_OFFSET_X * math.sin(camera_angle_rad)
+            camera_x = (self.px.x + self.CAMERA_OFFSET_X * math.cos(camera_angle_rad))
+            camera_y = (self.px.y + self.CAMERA_OFFSET_X * math.sin(camera_angle_rad))
 
             obstacle_x = camera_x + estimated_distance * math.cos(camera_angle_rad)
             obstacle_y = camera_y + estimated_distance * math.sin(camera_angle_rad)
@@ -283,37 +283,6 @@ class AsyncObstacleAvoidance:
 
         finally:
             self.current_maneuver = None
-
-    def _update_vision_detections(self, detected_objects: List[Dict]):
-        """Update map with obstacles detected by vision system"""
-        if not detected_objects:
-            return
-
-        for obj in detected_objects:
-            # Calculate relative position from bounding box
-            box = obj['box']  # (xmin, ymin, xmax, ymax)
-            box_center_x = (box[0] + box[2]) / 2
-            box_width = box[2] - box[0]
-
-            # Estimate distance based on box width
-            estimated_distance = 100 * (100 / box_width)  # Simplified example
-
-            # Calculate object position in world coordinates
-            camera_angle_rad = math.radians(self.heading)
-            camera_x = self.px.x + self.CAMERA_OFFSET_X * math.cos(camera_angle_rad)
-            camera_y = (self.px.y + self.CAMERA_OFFSET_X * math.sin(camera_angle_rad))
-
-            obstacle_x = camera_x + estimated_distance * math.cos(camera_angle_rad)
-            obstacle_y = camera_y + estimated_distance * math.sin(camera_angle_rad)
-
-            # Add to world map
-            self.world_map.add_obstacle(
-                x=obstacle_x,
-                y=obstacle_y,
-                radius=10.0,  # Adjust based on object type/size
-                confidence=obj['confidence'],
-                label=obj['label']
-            )
 
     async def forward_movement(self):
         while True:
