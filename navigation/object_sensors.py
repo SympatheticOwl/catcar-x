@@ -6,7 +6,6 @@ import math
 from world_map import WorldMap
 from picarx_wrapper import PicarXWrapper
 from vision_system import VisionSystem
-from scipy import ndimage
 
 class AsyncObstacleAvoidance:
     def __init__(self):
@@ -44,18 +43,15 @@ class AsyncObstacleAvoidance:
 
         # scanning parameters
         map_size = 100
-        self.map_size = map_size
-        self.map = np.zeros((map_size, map_size))
+        # self.map_size = map_size
+        # self.map = np.zeros((map_size, map_size))
         self.scan_range = (-60, 60)
         self.scan_step = 5
 
-        self.padding_size = 2  # Number of cells to pad around obstacles
-        self.padding_structure = np.ones((2, 2))  # 3x3 structuring element for dilation
-
-    def visualize_map(self):
-        """Print ASCII visualization of the map"""
-        for row in self.map:
-            print(''.join(['1' if cell else '0' for cell in row]))
+    # def visualize_map(self):
+    #     """Print ASCII visualization of the map"""
+    #     for row in self.map:
+    #         print(''.join(['1' if cell else '0' for cell in row]))
 
     def _update_ultrasonic_detection(self, distance: float):
         """Update map with obstacle detected by ultrasonic sensor"""
@@ -129,54 +125,10 @@ class AsyncObstacleAvoidance:
         for angle in range(start_angle, end_angle + 1, self.scan_step):
             self.px.set_cam_pan_angle(angle)
             await asyncio.sleep(0.1)
-
-            distances = await self.scan_avg()
-            if distances:
-                avg_dist = sum(distances) / len(distances)
-                scan_data.append((angle, avg_dist))
+            await self.scan_avg()
 
         self.px.set_cam_pan_angle(0)
         return scan_data
-
-    def update_map(self, scan_data):
-        self.map = np.zeros((self.map_size, self.map_size))
-
-        for i in range(len(scan_data) - 1):
-            angle1, dist1 = scan_data[i]
-            angle2, dist2 = scan_data[i + 1]
-
-            # Convert to cartesian coordinates
-            point1 = self._polar_to_cartesian(angle1, dist1)
-            point2 = self._polar_to_cartesian(angle2, dist2)
-
-            # Interpolate between points
-            num_points = max(
-                abs(int(point2[0] - point1[0])),
-                abs(int(point2[1] - point1[1]))
-            ) + 1
-
-            if num_points > 1:
-                x_points = np.linspace(point1[0], point2[0], num_points)
-                y_points = np.linspace(point1[1], point2[1], num_points)
-
-                # Mark interpolated points
-                for x, y in zip(x_points, y_points):
-                    map_x = int(x + self.map_size // 2)
-                    map_y = int(y + self.map_size // 2)
-
-                    if (0 <= map_x < self.map_size and
-                            0 <= map_y < self.map_size):
-                        self.map[map_y, map_x] = 1
-
-        # Apply padding
-        self.map = ndimage.binary_dilation(
-            self.map,
-            structure=self.padding_structure,
-            iterations=self.padding_size
-        )
-
-        print("\nCurrent Map (with padding):")
-        self.visualize_map()
 
     def _polar_to_cartesian(self, angle_deg, distance):
         """Convert polar coordinates to cartesian"""
@@ -230,12 +182,12 @@ class AsyncObstacleAvoidance:
         self.emergency_stop_flag = False
         self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
 
-    def find_best_direction(self, scan_data):
+    def find_best_direction(self):
         """Analyze scan data to find the best direction to move"""
         max_distance = 0
         best_angle = 0
 
-        for angle, distance in scan_data:
+        for angle, distance in self.world_map.grid:
             if distance > max_distance:
                 max_distance = distance
                 best_angle = angle
@@ -248,10 +200,11 @@ class AsyncObstacleAvoidance:
             self.px.forward(0)
             await asyncio.sleep(0.5)
 
-            scan_data = await self.scan_environment()
-            self.update_map(scan_data)
+            await self.scan_environment()
+            # add padding once scanning is done
+            self.world_map.add_padding()
 
-            best_angle, max_distance = self.find_best_direction(scan_data)
+            best_angle, max_distance = self.find_best_direction()
 
             # normal evasive maneuver
             print("Backing up...")

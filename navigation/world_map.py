@@ -1,6 +1,7 @@
 import time
 import numpy as np
 from typing import Tuple, Dict
+from scipy import ndimage
 
 class WorldMap:
     def __init__(self, map_size: int = 400, resolution: float = 1.0):
@@ -19,6 +20,9 @@ class WorldMap:
         # Obstacle tracking
         self.obstacles: Dict[str, Dict] = {}  # Track individual obstacles
         self.obstacle_id_counter = 0
+
+        self.padding_size = 2  # Number of cells to pad around obstacles
+        self.padding_structure = np.ones((2, 2))  # 3x3 structuring element for dilation
 
     def world_to_grid(self, x: float, y: float) -> Tuple[int, int]:
         """Convert world coordinates (cm) to grid coordinates"""
@@ -118,6 +122,17 @@ class WorldMap:
         y_max = min(self.grid_size, grid_y + grid_radius + 1)
 
         self.grid[y_min:y_max, x_min:x_max] = 0
+
+    def add_padding(self):
+        # Apply padding
+        self.grid = ndimage.binary_dilation(
+            self.grid,
+            structure=self.padding_structure,
+            iterations=self.padding_size
+        )
+
+        print("\nCurrent Map (with padding):")
+        self.world_map.visualize_map()
 
     def visualize_map(self):
         """Print ASCII visualization of the map"""
