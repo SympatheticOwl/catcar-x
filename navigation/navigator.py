@@ -1,47 +1,41 @@
 import asyncio
 from object_sensors import AsyncObstacleAvoidance
-
+from picarx_wrapper import PicarXWrapper
 
 async def main():
-    """Main function to start goal-based navigation"""
-    robot = AsyncObstacleAvoidance()
+    # Initialize the wrapper and obstacle avoidance system
+    px_wrapper = PicarXWrapper()
+    obstacle_system = AsyncObstacleAvoidance(px_wrapper)
 
     # Start the background tasks
-    control_task = asyncio.create_task(robot.run())
+    system_task = asyncio.create_task(obstacle_system.run())
 
     try:
-        # Define waypoints for a square pattern
-        waypoints = [
+        # Example navigation sequence
+        goals = [
             (50, 0),  # Move 50cm forward
-            (50, 50),  # Turn right and move 50cm
-            (0, 50),  # Return to starting y but at x=0
+            (50, 50),  # Turn right and move to point
+            (0, 50),  # Move left
             (0, 0)  # Return to start
         ]
 
-        # Navigate through waypoints
-        for goal_x, goal_y in waypoints:
+        for goal_x, goal_y in goals:
             print(f"\nNavigating to goal: ({goal_x}, {goal_y})")
-            await robot.navigate_to_goal(goal_x, goal_y)
-
-            # Get current position after reaching waypoint
-            position = robot.px.get_position()
-            print(f"Current position: ({position['x']:.1f}, {position['y']:.1f})")
-            print(f"Current heading: {position['heading']:.1f}°")
-
-            # Optional pause between waypoints
-            await asyncio.sleep(1.0)
+            await obstacle_system.navigate_to_goal(goal_x, goal_y)
+            current_pos = px_wrapper.get_position()
+            print(f"Current position: ({current_pos['x']:.1f}, {current_pos['y']:.1f})")
+            await asyncio.sleep(1)  # Pause between goals
 
     except KeyboardInterrupt:
         print("\nNavigation interrupted by user")
     finally:
         # Cleanup
-        control_task.cancel()
+        system_task.cancel()
         try:
-            await control_task
+            await system_task
         except asyncio.CancelledError:
             pass
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-
