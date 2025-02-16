@@ -34,15 +34,12 @@ class PicarXWrapper:
         self.NINETY_DEG_TURN_TIME = 2.5  # Time to complete a 90-degree turn
         self.TURN_RATE = 90 / self.NINETY_DEG_TURN_TIME  # degrees per second at max steering
 
-        track_thread = threading.Thread(target=self._continuous_position_tracking(), name="pos_tracker")
-        track_thread.start()
-
     def _speed_to_cm_per_sec(self, speed_value):
         """Convert motor speed value to cm/s"""
         rpm = (abs(speed_value) / self.MAX_MOTOR_SPEED) * self.MAX_RPM
         return (rpm * self.WHEEL_CIRCUMFERENCE) / 60
 
-    def _continuous_position_tracking(self):
+    def continuous_position_tracking(self):
         """Continuously update position based on movement"""
         while True:
             current_time = time.time()

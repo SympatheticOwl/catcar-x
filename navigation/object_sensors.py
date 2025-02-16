@@ -329,11 +329,12 @@ class AsyncObstacleAvoidance:
         tasks = []
         try:
             # Add vision task to existing tasks
+            pos_trak_task = asyncio.create_task(self.px.continuous_position_tracking())
             vision_task = asyncio.create_task(self.vision.capture_and_detect())
             ultrasonic_task = asyncio.create_task(self.ultrasonic_monitoring())
             cliff_task = asyncio.create_task(self.cliff_monitoring())
             movement_task = asyncio.create_task(self.forward_movement())
-            tasks = [vision_task, ultrasonic_task, cliff_task, movement_task]
+            tasks = [pos_trak_task, vision_task, ultrasonic_task, cliff_task, movement_task]
             await asyncio.gather(*tasks)
         except asyncio.CancelledError:
             print("\nShutting down gracefully...")
