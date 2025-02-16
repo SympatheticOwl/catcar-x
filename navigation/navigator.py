@@ -1,6 +1,7 @@
 import asyncio
 from object_sensors import AsyncObstacleAvoidance
 
+
 async def main():
     """Main function to start goal-based navigation"""
     robot = AsyncObstacleAvoidance()
@@ -9,7 +10,7 @@ async def main():
     control_task = asyncio.create_task(robot.run())
 
     try:
-        # Define waypoints
+        # Define waypoints for a square pattern
         waypoints = [
             (50, 0),  # Move 50cm forward
             (50, 50),  # Turn right and move 50cm
@@ -23,7 +24,7 @@ async def main():
             await robot.navigate_to_goal(goal_x, goal_y)
 
             # Get current position after reaching waypoint
-            position = robot.pxw.get_position()
+            position = robot.px.get_position()
             print(f"Current position: ({position['x']:.1f}, {position['y']:.1f})")
             print(f"Current heading: {position['heading']:.1f}°")
 
