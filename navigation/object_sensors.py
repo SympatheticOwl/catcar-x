@@ -326,7 +326,6 @@ class AsyncObstacleAvoidance:
                     # Perform emergency backup and scan
                     print("Backing up and scanning environment...")
                     await self.evasive_maneuver()
-                    await self.scan_environment()
                     continue
 
                 # Find path to target
@@ -389,7 +388,7 @@ class AsyncObstacleAvoidance:
             cliff_task = asyncio.create_task(self.cliff_monitoring())
             navigation_task = asyncio.create_task(self.navigate_to_target(100, 50))
             tasks = [pos_track_task, vision_task, ultrasonic_task, cliff_task, navigation_task]
-            await asyncio.gather(navigation_task)
+            await asyncio.gather(*tasks)
         except asyncio.CancelledError:
             print("\nShutting down gracefully...")
         finally:
