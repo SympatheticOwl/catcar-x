@@ -50,7 +50,7 @@ class AsyncObstacleAvoidance:
     async def scan_avg(self):
         distances = []
         for _ in range(3):
-            dist = self.px.px.ultrasonic.read()
+            dist = self.px.ultrasonic.read()
             if dist and 0 < dist < 300:  # Filter invalid readings
                 distances.append(dist)
             await asyncio.sleep(0.01)
@@ -60,7 +60,7 @@ class AsyncObstacleAvoidance:
         """Navigate to a waypoint while avoiding obstacles"""
         try:
             self.current_waypoint = (x, y)
-            reached_target = await self.px.px.move_to_target(x, y, self.speed)
+            reached_target = await self.px.move_to_target(x, y, self.speed)
 
             if reached_target:
                 print(f"Reached waypoint ({x}, {y})")
@@ -100,7 +100,7 @@ class AsyncObstacleAvoidance:
         start_angle, end_angle = self.scan_range
 
         for angle in range(start_angle, end_angle + 1, self.scan_step):
-            self.px.px.set_cam_pan_angle(angle)
+            self.px.set_cam_pan_angle(angle)
             await asyncio.sleep(0.1)
 
             distances = await self.scan_avg()
@@ -108,7 +108,7 @@ class AsyncObstacleAvoidance:
                 avg_dist = sum(distances) / len(distances)
                 scan_data.append((angle, avg_dist))
 
-        self.px.px.set_cam_pan_angle(0)
+        self.px.set_cam_pan_angle(0)
         return scan_data
 
     def update_map(self, scan_data):
@@ -178,7 +178,7 @@ class AsyncObstacleAvoidance:
 
     async def cliff_monitoring(self):
         while True:
-            self.is_cliff = self.px.px.get_cliff_status(self.px.px.get_grayscale_data())
+            self.is_cliff = self.px.get_cliff_status(self.px.get_grayscale_data())
 
             if (self.is_cliff and
                     self.is_moving and
@@ -203,7 +203,7 @@ class AsyncObstacleAvoidance:
             self.navigation_task = None
 
         # Stop movement
-        await self.px.px.stop()
+        await self.px.stop()
         await asyncio.sleep(0.5)
 
         self.emergency_stop_flag = False
@@ -234,19 +234,19 @@ class AsyncObstacleAvoidance:
             # Back up while tracking position
             print("Backing up...")
             self.is_backing_up = True
-            await self.px.px.forward_distance(-20, self.speed)  # Back up 20cm
+            await self.px.forward_distance(-20, self.speed)  # Back up 20cm
             self.is_backing_up = False
 
             # Turn toward best direction
             print(f"Turning to {best_angle}° (clearest path: {max_distance:.1f}cm)")
-            await self.px.px.turn_to_heading(best_angle)
+            await self.px.turn_to_heading(best_angle)
 
             # Move forward a bit
             if not self.emergency_stop_flag:
-                await self.px.px.forward_distance(20, self.speed)  # Move forward 20cm
+                await self.px.forward_distance(20, self.speed)  # Move forward 20cm
 
         except asyncio.CancelledError:
-            await self.px.px.stop()
+            await self.px.stop()
             raise
         finally:
             self.current_maneuver = None
@@ -270,7 +270,7 @@ class AsyncObstacleAvoidance:
                     if not self.is_moving:
                         print("Moving forward...")
                         self.is_moving = True
-                        self.px.px.forward(self.speed)
+                        self.px.forward(self.speed)
                 else:
                     if self.is_moving:
                         if self.is_cliff:
@@ -280,7 +280,7 @@ class AsyncObstacleAvoidance:
                         else:
                             print(f"Ultrasonic detected obstacle at {self.current_distance:.1f}cm")
                         self.is_moving = False
-                        self.px.px.forward(0)
+                        self.px.forward(0)
                         self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
 
             await asyncio.sleep(0.1)
@@ -293,7 +293,7 @@ class AsyncObstacleAvoidance:
             vision_task = asyncio.create_task(self.vision.capture_and_detect())
             ultrasonic_task = asyncio.create_task(self.ultrasonic_monitoring())
             cliff_task = asyncio.create_task(self.cliff_monitoring())
-            movement_task = asyncio.create_task(self.forward_movement(10, 0))
+            movement_task = asyncio.create_task(self.forward_movement())
             tasks = [vision_task, ultrasonic_task, cliff_task, movement_task]
             await asyncio.gather(*tasks)
         except asyncio.CancelledError:
@@ -307,6 +307,6 @@ class AsyncObstacleAvoidance:
                 pass
 
             self.vision.cleanup()
-            self.px.px.forward(0)
-            self.px.px.set_dir_servo_angle(0)
+            self.px.forward(0)
+            self.px.set_dir_servo_angle(0)
             print("Shutdown complete")

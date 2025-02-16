@@ -1,167 +1,131 @@
 import math
 import time
-import asyncio
-from typing import Tuple
 from picarx import Picarx
 
 class PicarXWrapper:
     def __init__(self):
         self.px = Picarx()
 
-        # Position state
-        self.x = 0.0  # Position in feet
-        self.y = 0.0
-        self.heading = 0.0  # Heading in degrees, 0 is North, positive is clockwise
+        # Position tracking
+        self.x = 0.0  # cm
+        self.y = 0.0  # cm
+        self.heading = 0.0  # degrees, 0 is forward, positive is clockwise
 
-        # Movement calibration constants
-        self.SPEED = 30  # Base speed
-        self.TURNING_SPEED = 25
-        self.FEET_PER_SECOND = 0.5  # Estimated speed in feet/second at base speed
-        self.DEGREES_PER_SECOND = 60  # Estimated turning rate in degrees/second
-        self.TURN_RADIUS = 1.0  # Estimated turning radius in feet
+        # Movement tracking
+        self.last_movement_time = time.time()
+        self.current_speed = 0  # Speed in cm/s
+        self.is_moving = False
 
-        # Initialize ultrasonic
-        self.min_safe_distance = 15  # cm
+        # Physical constants for movement calculations
+        self.WHEEL_DIAMETER = 6.5  # cm
+        self.WHEEL_CIRCUMFERENCE = math.pi * self.WHEEL_DIAMETER
+        self.WHEELBASE = 9.7  # Distance between wheels in cm
+        self.MAX_STEERING_ANGLE = 28  # Maximum steering angle in degrees
 
-    def get_position(self) -> Tuple[float, float, float]:
-        """Returns current position (x, y) in feet and heading in degrees"""
-        return (self.x, self.y, self.heading)
+        # Motor constants
+        self.MAX_MOTOR_SPEED = 100  # Maximum motor speed value
+        self.MAX_RPM = 150  # Approximate max RPM at full speed
+
+    def _speed_to_cm_per_sec(self, speed_value):
+        """Convert motor speed value to cm/s"""
+        # Convert speed value (0-100) to RPM
+        rpm = (abs(speed_value) / self.MAX_MOTOR_SPEED) * self.MAX_RPM
+
+        # Convert RPM to cm/s
+        # RPM * circumference = distance per minute
+        # Divide by 60 to get distance per second
+        return (rpm * self.WHEEL_CIRCUMFERENCE) / 60
+
+    def _update_position(self):
+        """Update position based on time elapsed and current movement"""
+        current_time = time.time()
+        elapsed_time = current_time - self.last_movement_time
+
+        if self.is_moving:
+            # Calculate distance traveled
+            distance = self.current_speed * elapsed_time
+
+            # Convert heading to radians for calculations
+            heading_rad = math.radians(self.heading)
+
+            # Update position based on heading
+            self.x += distance * math.cos(heading_rad)
+            self.y += distance * math.sin(heading_rad)
+
+        self.last_movement_time = current_time
+
+    def forward(self, speed):
+        """Move forward with speed tracking"""
+        self._update_position()
+        self.px.forward(speed)
+
+        # Update movement tracking using wheel diameter-based calculation
+        self.current_speed = self._speed_to_cm_per_sec(speed)
+        self.is_moving = speed != 0
+
+    def backward(self, speed):
+        """Move backward with speed tracking"""
+        self._update_position()
+        self.px.backward(speed)
+
+        # Update movement tracking using wheel diameter-based calculation
+        self.current_speed = -self._speed_to_cm_per_sec(speed)
+        self.is_moving = speed != 0
+
+    def stop(self):
+        """Stop movement"""
+        self._update_position()
+        self.px.forward(0)
+
+        # Update movement tracking
+        self.current_speed = 0
+        self.is_moving = False
+
+    def set_dir_servo_angle(self, angle):
+        """Set steering angle and update heading calculations"""
+        self._update_position()
+
+        # Clamp steering angle
+        clamped_angle = max(-self.MAX_STEERING_ANGLE,
+                            min(self.MAX_STEERING_ANGLE, angle))
+
+        self.px.set_dir_servo_angle(clamped_angle)
+
+        if self.is_moving:
+            # Calculate heading change based on steering geometry
+            # Using Ackermann steering geometry for better accuracy
+            # turn_radius = wheelbase / tan(steering_angle)
+            if clamped_angle != 0:
+                turn_radius = self.WHEELBASE / math.tan(math.radians(abs(clamped_angle)))
+                # Calculate angular velocity based on current speed and turn radius
+                angular_velocity = (self.current_speed / turn_radius)  # radians per second
+
+                # Update heading (convert to degrees)
+                heading_change = math.degrees(angular_velocity * 0.1)  # Small time step
+                self.heading += math.copysign(heading_change, clamped_angle)
+
+                # Normalize heading to 0-360 degrees
+                self.heading = self.heading % 360
+
+    def get_position(self):
+        """Get current position and heading"""
+        self._update_position()
+        return {
+            'x': round(self.x, 2),
+            'y': round(self.y, 2),
+            'heading': round(self.heading, 2),
+            'speed': round(self.current_speed, 2)
+        }
 
     def reset_position(self):
         """Reset position tracking to origin"""
         self.x = 0.0
         self.y = 0.0
         self.heading = 0.0
+        self.last_movement_time = time.time()
 
-    def _update_position(self, distance: float):
-        """Update position based on movement distance and current heading"""
-        # Convert heading to radians
-        heading_rad = math.radians(self.heading)
+        # Delegate other Picarx methods to the base class
 
-        # Update position using trigonometry
-        self.x += distance * math.sin(heading_rad)  # East is positive X
-        self.y += distance * math.cos(heading_rad)  # North is positive Y
-
-    def scan_avg(self):
-        distances = []
-        for _ in range(3):
-            dist = self.px.ultrasonic.read()
-            if dist and 0 < dist < 300:  # Filter invalid readings
-                distances.append(dist)
-            time.sleep(0.01)
-        return distances
-
-    def check_path_clear(self, distance: float) -> bool:
-        """Check if path is clear for given distance"""
-        distances = self.scan_avg()
-        if distances:
-            # Convert intended movement distance to cm for comparison
-            distance_cm = distance * 30.48  # feet to cm
-            return (sum(distances) / len(distances)) > min(distance_cm, self.min_safe_distance)
-        return False
-
-
-    async def move_distance(self, distance: float) -> bool:
-        """
-        Move specified distance in feet along current heading
-        Returns True if movement completed, False if blocked
-        """
-        if not self.check_path_clear(distance):
-            return False
-
-        # Calculate movement time based on calibrated speed
-        movement_time = abs(distance) / self.FEET_PER_SECOND
-
-        # Set direction based on positive/negative distance
-        if distance > 0:
-            self.px.forward(self.SPEED)
-        else:
-            self.px.backward(self.SPEED)
-
-        # Move for calculated duration
-        time.sleep(movement_time)
-        self.px.forward(0)  # Stop
-
-        # Update position tracking
-        self._update_position(distance)
-        return True
-
-    def turn_to_heading(self, target_heading: float):
-        """Turn to specified absolute heading in degrees"""
-        # Normalize target heading to 0-360
-        target_heading = target_heading % 360
-
-        # Calculate shortest turning direction
-        current_heading = self.heading % 360
-        angle_diff = target_heading - current_heading
-
-        # Normalize angle difference to -180 to +180
-        if angle_diff > 180:
-            angle_diff -= 360
-        elif angle_diff < -180:
-            angle_diff += 360
-
-        # Calculate turn time
-        turn_time = abs(angle_diff) / self.DEGREES_PER_SECOND
-
-        # Execute turn
-        if angle_diff > 0:
-            self.px.set_dir_servo_angle(30)  # Turn right
-        else:
-            self.px.set_dir_servo_angle(-30)  # Turn left
-
-        self.px.forward(self.TURNING_SPEED)
-        time.sleep(turn_time)
-
-        # Stop and straighten wheels
-        self.px.forward(0)
-        self.px.set_dir_servo_angle(0)
-
-        # Update heading
-        self.heading = target_heading
-
-    async def move_to_position(self, target_x: float, target_y: float) -> bool:
-        """
-        Move to specified position relative to start point
-        Returns True if position reached, False if blocked
-        """
-        # Calculate required heading and distance
-        dx = target_x - self.x
-        dy = target_y - self.y
-
-        distance = math.sqrt(dx * dx + dy * dy)
-        target_heading = math.degrees(math.atan2(dx, dy)) % 360
-
-        # Turn to face target
-        self.turn_to_heading(target_heading)
-
-        # Move to target
-        return await self.move_distance(distance)
-
-    def scan_surroundings(self) -> list[Tuple[float, float]]:
-        """
-        Scan surroundings using ultrasonic sensor
-        Returns list of (angle, distance) tuples
-        """
-        scan_data = []
-
-        # Scan from -60 to +60 degrees
-        for angle in range(-60, 61, 10):
-            self.px.set_cam_pan_angle(angle)
-            time.sleep(0.1)  # Let sensor settle
-
-            # Take multiple readings and average
-            distances = []
-            for _ in range(3):
-                dist = self.px.ultrasonic.read()
-                if dist and 0 < dist < 300:  # Filter invalid readings
-                    distances.append(dist)
-                time.sleep(0.01)
-
-            if distances:
-                avg_dist = sum(distances) / len(distances)
-                scan_data.append((angle, avg_dist))
-
-        # Reset camera position
-        self.px.set_cam_pan_angle(0)
-        return scan_data
+    def __getattr__(self, attr):
+        """Delegate any other methods to the underlying Picarx instance"""
+        return getattr(self.px, attr)
