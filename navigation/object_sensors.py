@@ -1,7 +1,6 @@
 import numpy as np
 import asyncio
 import math
-from picarx import Picarx
 from vision_system import VisionSystem
 from scipy import ndimage
 from picarx_wrapper import PicarXWrapper
@@ -9,7 +8,7 @@ from picarx_wrapper import PicarXWrapper
 
 class AsyncObstacleAvoidance:
     def __init__(self):
-        self.px = PicarXWrapper()
+        self.pxw = PicarXWrapper()
 
         # configuration parameters
         self.min_distance = 15
@@ -53,7 +52,7 @@ class AsyncObstacleAvoidance:
     async def scan_avg(self):
         distances = []
         for _ in range(3):
-            dist = self.px.px.ultrasonic.read()  # Note the nested px access
+            dist = self.pxw.px.ultrasonic.read()  # Note the nested px access
             if dist and 0 < dist < 300:
                 distances.append(dist)
             await asyncio.sleep(0.01)
@@ -65,7 +64,7 @@ class AsyncObstacleAvoidance:
         start_angle, end_angle = self.scan_range
 
         for angle in range(start_angle, end_angle + 1, self.scan_step):
-            self.px.px.set_cam_pan_angle(angle)
+            self.pxw.px.set_cam_pan_angle(angle)
             await asyncio.sleep(0.1)
 
             distances = await self.scan_avg()
@@ -73,14 +72,14 @@ class AsyncObstacleAvoidance:
                 avg_dist = sum(distances) / len(distances)
                 scan_data.append((angle, avg_dist))
 
-        self.px.px.set_cam_pan_angle(0)
+        self.pxw.px.set_cam_pan_angle(0)
         return scan_data
 
     def update_map(self, scan_data):
         """Update internal map with new scan data and add padding around obstacles"""
         self.map = np.zeros((self.map_size, self.map_size))
 
-        current_pos = self.px.get_position()
+        current_pos = self.pxw.get_position()
 
         for angle, distance in scan_data:
             # Convert to global coordinates using current position
@@ -90,7 +89,7 @@ class AsyncObstacleAvoidance:
 
             if (0 <= map_x < self.map_size and 0 <= map_y < self.map_size):
                 self.map[map_y, map_x] = 1
-                self.px.add_obstacle(distance, angle)
+                self.pxw.add_obstacle(distance, angle)
 
         # Apply padding using binary dilation
         self.map = ndimage.binary_dilation(
@@ -128,7 +127,7 @@ class AsyncObstacleAvoidance:
     async def cliff_monitoring(self):
         while True:
             if self.navigation_active:
-                self.is_cliff = self.px.px.get_cliff_status(self.px.px.get_grayscale_data())
+                self.is_cliff = self.pxw.px.get_cliff_status(self.pxw.px.get_grayscale_data())
 
                 if (self.is_cliff and
                         not self.emergency_stop_flag and
@@ -140,7 +139,7 @@ class AsyncObstacleAvoidance:
 
     async def emergency_stop(self):
         self.emergency_stop_flag = True
-        self.px.stop()
+        self.pxw.stop()
         await asyncio.sleep(0.5)
         self.emergency_stop_flag = False
         await self.evasive_maneuver()
@@ -169,7 +168,7 @@ class AsyncObstacleAvoidance:
 
     async def evasive_maneuver(self):
         try:
-            self.px.stop()
+            self.pxw.stop()
             await asyncio.sleep(0.5)
 
             scan_data = await self.scan_environment()
@@ -177,7 +176,7 @@ class AsyncObstacleAvoidance:
 
             print("Backing up...")
             self.is_backing_up = True
-            await self.px.move_distance(-self.backup_time * self.speed, self.speed)
+            await self.pxw.move_distance(-self.backup_time * self.speed, self.speed)
             self.is_backing_up = False
 
             # Find clearest path
@@ -189,14 +188,14 @@ class AsyncObstacleAvoidance:
                     best_angle = angle
 
             print(f"Turning to {best_angle}° (clearest path: {max_distance:.1f}cm)")
-            await self.px.turn_to_angle(best_angle)
+            await self.pxw.turn_to_angle(best_angle)
 
             # Resume navigation if we have a goal
             if self.current_goal and not self.emergency_stop_flag:
                 await self.navigate_to_goal(*self.current_goal)
 
         except asyncio.CancelledError:
-            self.px.stop()
+            self.pxw.stop()
             raise
 
     async def forward_movement(self):
@@ -216,7 +215,7 @@ class AsyncObstacleAvoidance:
                     if not self.is_moving:
                         print("Moving forward...")
                         self.is_moving = True
-                        self.px.forward(self.speed)
+                        self.pxw.forward(self.speed)
                 else:
                     if self.is_moving:
                         if self.is_cliff:
@@ -226,7 +225,7 @@ class AsyncObstacleAvoidance:
                         else:
                             print(f"Ultrasonic detected obstacle at {self.current_distance:.1f}cm")
                         self.is_moving = False
-                        self.px.forward(0)
+                        self.pxw.forward(0)
                         self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
 
             await asyncio.sleep(0.1)
@@ -242,7 +241,7 @@ class AsyncObstacleAvoidance:
                     await asyncio.sleep(0.1)
                     continue
 
-                success = await self.px.navigate_to_goal(goal_x, goal_y, self.speed)
+                success = await self.pxw.navigate_to_goal(goal_x, goal_y, self.speed)
                 if success:
                     print(f"Reached goal: ({goal_x}, {goal_y})")
                     self.current_goal = None
@@ -258,7 +257,7 @@ class AsyncObstacleAvoidance:
                 await asyncio.sleep(0.1)
 
         except asyncio.CancelledError:
-            self.px.stop()
+            self.pxw.stop()
             self.current_goal = None
             self.navigation_active = False
             raise
@@ -284,5 +283,5 @@ class AsyncObstacleAvoidance:
                 pass
 
             self.vision.cleanup()
-            self.px.stop()
+            self.pxw.stop()
             print("Shutdown complete")
