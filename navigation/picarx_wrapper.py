@@ -35,6 +35,17 @@ class PicarXWrapper:
         self.position_tolerance = 5.0  # cm
         self.heading_tolerance = math.radians(5)  # radians
 
+    async def scan_avg(self):
+        distances = []
+        for _ in range(3):
+            dist = self.px.px.ultrasonic.read()
+            if dist and 0 < dist < 300:
+                distances.append(dist)
+            else:
+                distances.append(300)
+            await asyncio.sleep(0.01)
+        return distances
+
     def _motor_speed_to_cms(self, motor_speed):
         """Convert motor speed value to approximate cm/s"""
         return (motor_speed / self.MAX_MOTOR_SPEED) * self.MAX_SPEED_CMS
@@ -148,10 +159,10 @@ class PicarXWrapper:
             await self.turn_to_angle(angle_to_goal)
 
             # Check for obstacles before moving
-            ultrasonic_distance = self.px.ultrasonic.read()
-            if ultrasonic_distance and ultrasonic_distance < self.min_obstacle_distance:
-                print(f"Obstacle detected at {ultrasonic_distance}cm")
-                self.add_obstacle(ultrasonic_distance, self.current_angle)
+            distances = await self.px.scan_avg()
+            if distances and distances < self.min_obstacle_distance:
+                print(f"Obstacle detected at {distances}cm")
+                self.add_obstacle(distances, self.current_angle)
                 self.movement_interrupted = True
                 return False
 

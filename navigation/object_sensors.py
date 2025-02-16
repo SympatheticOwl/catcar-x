@@ -50,17 +50,6 @@ class AsyncObstacleAvoidance:
         for row in self.map:
             print(''.join(['1' if cell else '0' for cell in row]))
 
-    async def scan_avg(self):
-        distances = []
-        for _ in range(3):
-            dist = self.px.px.ultrasonic.read()
-            if dist and 0 < dist < 300:
-                distances.append(dist)
-            else:
-                distances.append(300)
-            await asyncio.sleep(0.01)
-        return distances
-
     async def scan_environment(self):
         scan_data = []
         start_angle, end_angle = self.scan_range
@@ -69,7 +58,7 @@ class AsyncObstacleAvoidance:
             self.px.px.set_cam_pan_angle(angle)
             await asyncio.sleep(0.1)
 
-            distances = await self.scan_avg()
+            distances = await self.px.scan_avg()
             if distances:
                 avg_dist = sum(distances) / len(distances)
                 scan_data.append((angle, avg_dist))
@@ -115,7 +104,7 @@ class AsyncObstacleAvoidance:
 
     async def ultrasonic_monitoring(self):
         while True:
-            distances = await self.scan_avg()
+            distances = await self.px.scan_avg()
             if distances:
                 self.current_distance = sum(distances) / len(distances)
                 print(f"Distance: {self.current_distance:.1f} cm")
