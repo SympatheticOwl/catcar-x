@@ -174,39 +174,3 @@ class Pathfinder:
         # Return world coordinates of end point
         end_point = self.path[end_idx].position
         return self.world_map.grid_to_world(*end_point)
-
-    async def navigate_to_goal(self, goal_x, goal_y):
-        """Navigate to goal position with obstacle avoidance"""
-        print(f"Starting navigation to goal: ({goal_x}, {goal_y})")
-
-        while True:
-            # Get current position
-            pos = self.picar.get_position()
-            current_x, current_y = pos['x'], pos['y']
-
-            # Scan environment
-            print("Scanning environment...")
-            await self.picar.scan_environment()
-            self.world_map.add_padding()
-
-            # Find path to goal
-            print("Finding path to goal...")
-            path_found = await self.find_path(
-                (current_x, current_y), (goal_x, goal_y))
-
-            if not path_found:
-                print("No valid path found!")
-                return False
-
-            # Get next segment endpoint
-            next_point = self.get_next_segment()
-            if not next_point:
-                print("Reached goal!")
-                return True
-
-            print(f"Navigating to intermediate point: {next_point}")
-            # Navigate to segment endpoint
-            await self.picar.navigate_to_point(*next_point)
-
-            # Small delay before next iteration
-            await asyncio.sleep(0.1)

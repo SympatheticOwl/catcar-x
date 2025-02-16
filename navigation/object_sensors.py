@@ -276,102 +276,40 @@ class AsyncObstacleAvoidance:
 
             await asyncio.sleep(0.1)
 
-    async def navigate_to_point(self, target_x, target_y, speed=30):
+    async def navigate_to_goal(self, goal_x, goal_y):
+        """Navigate to goal position with obstacle avoidance"""
+        print(f"Starting navigation to goal: ({goal_x}, {goal_y})")
+
         while True:
             # Get current position
-            current_pos = self.px.get_position()
-            print(
-                f'Current position: x={current_pos["x"]:.1f}, y={current_pos["y"]:.1f}, heading={current_pos["heading"]:.1f}°')
+            pos = self.px.get_position()
+            current_x, current_y = pos['x'], pos['y']
 
-            # Calculate distance to target
-            dx = target_x - current_pos['x']
-            dy = target_y - current_pos['y']
-            distance_to_target = math.sqrt(dx ** 2 + dy ** 2)
+            # Scan environment
+            print("Scanning environment...")
+            await self.scan_environment()
+            self.world_map.add_padding()
 
-            # If we're close enough to target, stop
-            if distance_to_target < 5:  # 5cm threshold
-                self.px.stop()
+            # Find path to goal
+            print("Finding path to goal...")
+            path_found = await self.pathfinder.find_path(
+                (current_x, current_y), (goal_x, goal_y))
+
+            if not path_found:
+                print("No valid path found!")
+                return False
+
+            # Get next segment endpoint
+            next_point = self.pathfinder.get_next_segment()
+            if not next_point:
+                print("Reached goal!")
                 return True
 
-            # Check for obstacles and update world map
-            if self.vision_enabled:
-                objects = self.vision.get_obstacle_info()
-                if objects:
-                    self._update_vision_detections(objects)
+            print(f"Navigating to intermediate point: {next_point}")
+            # Navigate to segment endpoint
+            await self.px.navigate_to_point(*next_point)
 
-            # Get ultrasonic reading and update map
-            distances = await self.scan_avg()
-            if distances:
-                self.current_distance = sum(distances) / len(distances)
-                if self.current_distance < 300:  # Valid reading threshold
-                    self._update_ultrasonic_detection(self.current_distance)
-
-            # Find path to target using A*
-            path = self.pathfinder.find_path(
-                current_pos['x'],
-                current_pos['y'],
-                target_x,
-                target_y
-            )
-
-            if not path:
-                print("No valid path found! Performing scan...")
-                # Perform a full environment scan
-                await self.scan_environment()
-                # Try path planning again
-                path = self.pathfinder.find_path(
-                    current_pos['x'],
-                    current_pos['y'],
-                    target_x,
-                    target_y
-                )
-                if not path:
-                    print("Still no valid path found. Stopping.")
-                    self.px.stop()
-                    return False
-
-            # Get next waypoint from path
-            next_x, next_y = path[1] if len(path) > 1 else path[0]
-
-            # Calculate angle to next waypoint
-            dx = next_x - current_pos['x']
-            dy = next_y - current_pos['y']
-            target_angle = math.degrees(math.atan2(dy, dx))
-
-            # Calculate angle difference
-            angle_diff = target_angle - current_pos['heading']
-            # Normalize to -180 to 180
-            angle_diff = (angle_diff + 180) % 360 - 180
-
-            # If we need to turn more than 45 degrees, stop and turn first
-            if abs(angle_diff) > 45:
-                self.px.stop()
-                await self.px.turn_to_heading(target_angle)
-                continue
-
-            # Calculate steering angle based on angle difference
-            steering_angle = self.px.calculate_steering_angle(angle_diff)
-            self.px.set_dir_servo_angle(steering_angle)
-
-            # Adjust speed based on turn sharpness and proximity to obstacles
-            speed_factor = 1.0
-            if self.current_distance < 50:  # Reduce speed when obstacles are near
-                speed_factor *= self.current_distance / 50
-
-            turn_factor = 1.0 - abs(steering_angle) / (2 * self.px.MAX_STEERING_ANGLE)
-            adjusted_speed = speed * speed_factor * turn_factor
-
-            # Move forward with adjusted speed
-            self.px.forward(adjusted_speed)
-
-            # Visualize current state periodically
-            if time.time() % 5 < 0.1:  # Every 5 seconds
-                print("\nCurrent World Map:")
-                self.world_map.visualize_map()
-                print(f"Next waypoint: ({next_x:.1f}, {next_y:.1f})")
-                print(f"Steering angle: {steering_angle:.1f}°")
-                print(f"Speed: {adjusted_speed:.1f}")
-
+            # Small delay before next iteration
             await asyncio.sleep(0.1)
 
     async def run(self):
@@ -389,7 +327,7 @@ class AsyncObstacleAvoidance:
             await self.scan_environment()
             self.world_map.add_padding()
 
-            navigation_task = asyncio.create_task(self.pathfinder.navigate_to_goal(100, 50))
+            navigation_task = asyncio.create_task(self.navigate_to_goal(100, 50))
             tasks = [pos_track_task, vision_task, ultrasonic_task, cliff_task, navigation_task]
             await asyncio.gather(*tasks)
         except asyncio.CancelledError:
