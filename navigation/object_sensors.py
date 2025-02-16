@@ -1,6 +1,9 @@
+import time
+from typing import List, Dict
 import numpy as np
 import asyncio
 import math
+from world_map import WorldMap
 from picarx_wrapper import PicarXWrapper
 from vision_system import VisionSystem
 from scipy import ndimage
@@ -9,6 +12,15 @@ from scipy import ndimage
 class AsyncObstacleAvoidance:
     def __init__(self):
         self.px = PicarXWrapper()
+
+        # World mapping
+        self.world_map = WorldMap(map_size=400, resolution=1.0)  # 4m x 4m map, 1cm resolution
+
+        # Sensor offsets from center
+        self.ULTRASONIC_OFFSET_X = 5.0  # cm forward
+        self.ULTRASONIC_OFFSET_Y = 0.0  # cm sideways
+        self.CAMERA_OFFSET_X = 5.0  # cm forward
+        self.CAMERA_OFFSET_Y = 0.0  # cm sideways
 
         # configuration parameters
         self.min_distance = 15
@@ -46,6 +58,59 @@ class AsyncObstacleAvoidance:
         for row in self.map:
             print(''.join(['1' if cell else '0' for cell in row]))
 
+    def _update_ultrasonic_detection(self, distance: float):
+        """Update map with obstacle detected by ultrasonic sensor"""
+        if not (0 < distance < 300):  # Ignore invalid readings
+            return
+
+        # Calculate obstacle position in world coordinates
+        sensor_angle_rad = math.radians(self.px.heading)
+        sensor_x = self.px.x + self.ULTRASONIC_OFFSET_X * math.cos(sensor_angle_rad)
+        sensor_y = self.px.y + self.ULTRASONIC_OFFSET_X * math.sin(sensor_angle_rad)
+
+        obstacle_x = sensor_x + distance * math.cos(sensor_angle_rad)
+        obstacle_y = sensor_y + distance * math.sin(sensor_angle_rad)
+
+        # Add to world map
+        self.world_map.add_obstacle(
+            x=obstacle_x,
+            y=obstacle_y,
+            radius=5.0,  # Assume 5cm radius for ultrasonic detections
+            confidence=0.8,
+            label="ultrasonic_detection"
+        )
+
+    def _update_vision_detections(self, detected_objects: List[Dict]):
+        """Update map with obstacles detected by vision system"""
+        if not detected_objects:
+            return
+
+        for obj in detected_objects:
+            # Calculate relative position from bounding box
+            box = obj['box']  # (xmin, ymin, xmax, ymax)
+            box_center_x = (box[0] + box[2]) / 2
+            box_width = box[2] - box[0]
+
+            # Estimate distance based on box width
+            estimated_distance = 100 * (100 / box_width)  # Simplified example
+
+            # Calculate object position in world coordinates
+            camera_angle_rad = math.radians(self.px.heading)
+            camera_x = self.px.x + self.CAMERA_OFFSET_X * math.cos(camera_angle_rad)
+            camera_y = self.px.y + self.CAMERA_OFFSET_X * math.sin(camera_angle_rad)
+
+            obstacle_x = camera_x + estimated_distance * math.cos(camera_angle_rad)
+            obstacle_y = camera_y + estimated_distance * math.sin(camera_angle_rad)
+
+            # Add to world map
+            self.world_map.add_obstacle(
+                x=obstacle_x,
+                y=obstacle_y,
+                radius=10.0,  # Adjust based on object type/size
+                confidence=obj['confidence'],
+                label=obj['label']
+            )
+
     async def scan_avg(self):
         distances = []
         for _ in range(3):
@@ -53,6 +118,9 @@ class AsyncObstacleAvoidance:
             if dist and 0 < dist < 300:  # Filter invalid readings
                 distances.append(dist)
             await asyncio.sleep(0.01)
+
+        if distances:
+            self._update_ultrasonic_detection(sum(distances) / len(distances))
         return distances
 
     async def scan_environment(self):
@@ -215,6 +283,37 @@ class AsyncObstacleAvoidance:
         finally:
             self.current_maneuver = None
 
+    def _update_vision_detections(self, detected_objects: List[Dict]):
+        """Update map with obstacles detected by vision system"""
+        if not detected_objects:
+            return
+
+        for obj in detected_objects:
+            # Calculate relative position from bounding box
+            box = obj['box']  # (xmin, ymin, xmax, ymax)
+            box_center_x = (box[0] + box[2]) / 2
+            box_width = box[2] - box[0]
+
+            # Estimate distance based on box width
+            estimated_distance = 100 * (100 / box_width)  # Simplified example
+
+            # Calculate object position in world coordinates
+            camera_angle_rad = math.radians(self.heading)
+            camera_x = self.px.x + self.CAMERA_OFFSET_X * math.cos(camera_angle_rad)
+            camera_y = (self.px.y + self.CAMERA_OFFSET_X * math.sin(camera_angle_rad))
+
+            obstacle_x = camera_x + estimated_distance * math.cos(camera_angle_rad)
+            obstacle_y = camera_y + estimated_distance * math.sin(camera_angle_rad)
+
+            # Add to world map
+            self.world_map.add_obstacle(
+                x=obstacle_x,
+                y=obstacle_y,
+                radius=10.0,  # Adjust based on object type/size
+                confidence=obj['confidence'],
+                label=obj['label']
+            )
+
     async def forward_movement(self):
         while True:
             position = self.px.get_position()
@@ -224,6 +323,7 @@ class AsyncObstacleAvoidance:
                 if self.vision_enabled:
                     objects = self.vision.get_obstacle_info()
                     if objects:
+                        self._update_vision_detections(objects)
                         for obj in objects:
                             print(f"Vision system detected: {obj['label']}")
                             if obj['label'] == "stop sign":
@@ -247,6 +347,13 @@ class AsyncObstacleAvoidance:
                         self.px.forward(0)
                         self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
 
+            # Periodically visualize the map (for debugging)
+            if time.time() % 5 < 0.1:  # Every 5 seconds
+                print("\nCurrent World Map:")
+                self.world_map.visualize_map()
+                pos = self.px.get_position()
+                print(f"Position: x={pos['x']:.1f}, y={pos['y']:.1f}, heading={pos['heading']:.1f}°")
+
             await asyncio.sleep(0.1)
 
     async def run(self):
@@ -257,7 +364,7 @@ class AsyncObstacleAvoidance:
             vision_task = asyncio.create_task(self.vision.capture_and_detect())
             ultrasonic_task = asyncio.create_task(self.ultrasonic_monitoring())
             cliff_task = asyncio.create_task(self.cliff_monitoring())
-            movement_task = asyncio.create_task(self.run_navigation_test())
+            movement_task = asyncio.create_task(self.run())
             tasks = [vision_task, ultrasonic_task, cliff_task, movement_task]
             await asyncio.gather(*tasks)
         except asyncio.CancelledError:
