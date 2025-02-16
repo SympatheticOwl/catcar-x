@@ -23,7 +23,7 @@ class PicarXNavigator:
         self.MAX_STEERING_ANGLE = 30  # degrees
         self.POSITION_TOLERANCE = 5  # cm - how close we need to be to target
         self.HEADING_TOLERANCE = 5  # degrees - acceptable heading error
-        self.TURNING_TIME_90 = 4.0  # seconds for 90-degree turn
+        self.TURNING_TIME_90 = 2.0  # seconds for 90-degree turn
         self.DEGREES_PER_SECOND = 90 / self.TURNING_TIME_90  # degrees/second when turning
 
         # Navigation state
