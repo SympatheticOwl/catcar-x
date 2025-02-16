@@ -121,6 +121,7 @@ class PicarXWrapper:
             # Calculate distance and angle to target
             dx = target_x - self.x
             dy = target_y - self.y
+            print(f"Final position: x={self.x}, y={self.y}, heading={self.heading}")
             distance_to_target = math.sqrt(dx ** 2 + dy ** 2)
 
             # If we're close enough to target, stop
