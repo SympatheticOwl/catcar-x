@@ -4,6 +4,9 @@ import time
 import asyncio
 from picarx import Picarx
 
+from navigation.pathfinder import Pathfinder
+
+
 class PicarXWrapper:
     def __init__(self):
         self.px = Picarx()
@@ -104,13 +107,20 @@ class PicarXWrapper:
         self.px.set_dir_servo_angle(self.current_steering_angle)
 
     async def navigate_to_point(self, target_x, target_y, speed=30):
-        """Navigate to a target point while accounting for turning radius"""
+        """Navigate to a target point while avoiding obstacles"""
+        # Initialize path planner if not already done
+        if not hasattr(self, 'path_planner'):
+            self.pathfinder = Pathfinder(self.world_map)
+
         while True:
-            # Calculate distance and angle to target
-            dx = target_x - self.x
-            dy = target_y - self.y
-            print(f'self.x: {self.x}, self.y: {self.y}')
-            print(f'target.x: {self.x}, target.y: {self.y}')
+            # Get current position
+            current_pos = self.get_position()
+            print(
+                f'Current position: x={current_pos["x"]:.1f}, y={current_pos["y"]:.1f}, heading={current_pos["heading"]:.1f}°')
+
+            # Calculate distance to target
+            dx = target_x - current_pos['x']
+            dy = target_y - current_pos['y']
             distance_to_target = math.sqrt(dx ** 2 + dy ** 2)
 
             # If we're close enough to target, stop
@@ -118,11 +128,53 @@ class PicarXWrapper:
                 self.stop()
                 return True
 
-            # Calculate target angle in degrees
+            # Check for obstacles and update world map
+            if self.vision_enabled:
+                objects = self.vision.get_obstacle_info()
+                if objects:
+                    self._update_vision_detections(objects)
+
+            # Get ultrasonic reading and update map
+            distances = await self.scan_avg()
+            if distances:
+                self.current_distance = sum(distances) / len(distances)
+                if self.current_distance < 300:  # Valid reading threshold
+                    self._update_ultrasonic_detection(self.current_distance)
+
+            # Find path to target using A*
+            path = self.pathfinder.find_path(
+                current_pos['x'],
+                current_pos['y'],
+                target_x,
+                target_y
+            )
+
+            if not path:
+                print("No valid path found! Performing scan...")
+                # Perform a full environment scan
+                await self.scan_environment()
+                # Try path planning again
+                path = self.pathfinder.find_path(
+                    current_pos['x'],
+                    current_pos['y'],
+                    target_x,
+                    target_y
+                )
+                if not path:
+                    print("Still no valid path found. Stopping.")
+                    self.stop()
+                    return False
+
+            # Get next waypoint from path
+            next_x, next_y = path[1] if len(path) > 1 else path[0]
+
+            # Calculate angle to next waypoint
+            dx = next_x - current_pos['x']
+            dy = next_y - current_pos['y']
             target_angle = math.degrees(math.atan2(dy, dx))
 
             # Calculate angle difference
-            angle_diff = target_angle - self.heading
+            angle_diff = target_angle - current_pos['heading']
             # Normalize to -180 to 180
             angle_diff = (angle_diff + 180) % 360 - 180
 
@@ -136,9 +188,24 @@ class PicarXWrapper:
             steering_angle = self._calculate_steering_angle(angle_diff)
             self.set_dir_servo_angle(steering_angle)
 
-            # Adjust speed based on turn sharpness
-            adjusted_speed = speed * (1 - abs(steering_angle) / (2 * self.MAX_STEERING_ANGLE))
+            # Adjust speed based on turn sharpness and proximity to obstacles
+            speed_factor = 1.0
+            if self.current_distance < 50:  # Reduce speed when obstacles are near
+                speed_factor *= self.current_distance / 50
+
+            turn_factor = 1.0 - abs(steering_angle) / (2 * self.MAX_STEERING_ANGLE)
+            adjusted_speed = speed * speed_factor * turn_factor
+
+            # Move forward with adjusted speed
             self.forward(adjusted_speed)
+
+            # Visualize current state periodically
+            if time.time() % 5 < 0.1:  # Every 5 seconds
+                print("\nCurrent World Map:")
+                self.world_map.visualize_map()
+                print(f"Next waypoint: ({next_x:.1f}, {next_y:.1f})")
+                print(f"Steering angle: {steering_angle:.1f}°")
+                print(f"Speed: {adjusted_speed:.1f}")
 
             await asyncio.sleep(0.1)
 
