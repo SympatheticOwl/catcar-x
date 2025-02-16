@@ -7,7 +7,7 @@ from pathfinder import Pathfinder
 
 
 class PicarXWrapper:
-    def __init__(self):
+    def __init__(self, pathfinder: Pathfinder):
         self.px = Picarx()
 
         # Position tracking
@@ -108,8 +108,6 @@ class PicarXWrapper:
     async def navigate_to_point(self, target_x, target_y, speed=30):
         """Navigate to a target point while avoiding obstacles"""
         # Initialize path planner if not already done
-        if not hasattr(self, 'path_planner'):
-            self.pathfinder = Pathfinder(self.world_map)
 
         while True:
             # Get current position
