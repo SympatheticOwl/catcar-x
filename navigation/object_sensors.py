@@ -386,7 +386,7 @@ class AsyncObstacleAvoidance:
             cliff_task = asyncio.create_task(self.cliff_monitoring())
             # movement_task = asyncio.create_task(self.forward_movement())
             # navigation_task = asyncio.create_task(self.navigate_with_path_planning(50, 50))
-            navigation_task = asyncio.create_task(self.px.navigate_to_point(100, 50))
+            navigation_task = asyncio.create_task(self.navigate_to_point(100, 50))
             tasks = [pos_track_task, vision_task, ultrasonic_task, cliff_task, navigation_task]
             await asyncio.gather(*tasks)
         except asyncio.CancelledError:
