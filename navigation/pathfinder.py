@@ -14,129 +14,133 @@ class Pathfinder:
         self.world_map = world_map
         self.picar = picar
         self.min_turn_radius = picar.get_min_turn_radius()
+        self.grid_step = 20  # Use larger grid steps (20cm) for coarser pathfinding
 
     def heuristic(self, a: Tuple[int, int], b: Tuple[int, int]) -> float:
         """Euclidean distance heuristic"""
         return math.sqrt((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2)
 
     def get_neighbors(self, node: Tuple[int, int]) -> List[Tuple[int, int]]:
-        """Get valid neighboring cells"""
+        """Get valid neighboring cells using only 4 directions for simpler paths"""
         x, y = node
         neighbors = []
 
-        # Check 8 surrounding cells
-        for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0), (1, 1), (1, -1), (-1, 1), (-1, -1)]:
+        # Check only cardinal directions (N, E, S, W)
+        for dx, dy in [(0, self.grid_step), (self.grid_step, 0),
+                       (0, -self.grid_step), (-self.grid_step, 0)]:
             new_x, new_y = x + dx, y + dy
 
             # Check bounds
             if (0 <= new_x < self.world_map.grid_size and
                     0 <= new_y < self.world_map.grid_size):
 
-                # Debug print
-                print(f"Checking neighbor ({new_x}, {new_y})")
-                print(f"Grid value: {self.world_map.grid[new_y, new_x]}")
-
-                # Check if cell is obstacle-free
-                if self.world_map.grid[new_y, new_x] == 0:
-                    # Check turning radius constraint
-                    if self.check_turn_feasible(node, (new_x, new_y)):
-                        neighbors.append((new_x, new_y))
-                        print(f"Added valid neighbor: ({new_x}, {new_y})")
+                # Check if path to neighbor is clear
+                if self.is_path_clear(x, y, new_x, new_y):
+                    neighbors.append((new_x, new_y))
 
         return neighbors
 
-    def check_turn_feasible(self, current: Tuple[int, int], next: Tuple[int, int]) -> bool:
-        """Check if turn is feasible given car's minimum turning radius"""
-        # For initial testing, always return True to debug path finding
+    def is_path_clear(self, x1: int, y1: int, x2: int, y2: int) -> bool:
+        """Check if path between two points is clear of obstacles using line sampling"""
+        points = self.get_line_points(x1, y1, x2, y2)
+        for x, y in points:
+            if self.world_map.grid[y, x] != 0:  # Check if point is occupied
+                return False
         return True
 
+    def get_line_points(self, x1: int, y1: int, x2: int, y2: int) -> List[Tuple[int, int]]:
+        """Get points along line for collision checking"""
+        points = []
+        dx = abs(x2 - x1)
+        dy = abs(y2 - y1)
+        x, y = x1, y1
+        n = 1 + dx + dy
+        x_inc = 1 if x2 > x1 else -1
+        y_inc = 1 if y2 > y1 else -1
+        error = dx - dy
+        dx *= 2
+        dy *= 2
+
+        for _ in range(n):
+            points.append((x, y))
+            if error > 0:
+                x += x_inc
+                error -= dy
+            else:
+                y += y_inc
+                error += dx
+
+        return points
+
     def find_path(self, start: Tuple[float, float], goal: Tuple[float, float]) -> List[Tuple[float, float]]:
-        """Find path from start to goal using A*"""
-        # Convert world coordinates to grid coordinates
+        """Find path from start to goal using A* with reduced waypoints"""
+        # Quick check if direct path is possible
         start_grid = self.world_map.world_to_grid(start[0], start[1])
         goal_grid = self.world_map.world_to_grid(goal[0], goal[1])
 
-        print(f"Finding path from {start} to {goal}")
-        print(f"Grid coordinates: from {start_grid} to {goal_grid}")
+        # If direct path is clear, return just the goal point
+        if self.is_path_clear(start_grid[0], start_grid[1], goal_grid[0], goal_grid[1]):
+            return [start, goal]
 
-        # Validate coordinates
-        if not (0 <= start_grid[0] < self.world_map.grid_size and
-                0 <= start_grid[1] < self.world_map.grid_size and
-                0 <= goal_grid[0] < self.world_map.grid_size and
-                0 <= goal_grid[1] < self.world_map.grid_size):
-            print("Start or goal coordinates out of bounds!")
-            return []
-
-        # Initialize data structures
+        # If direct path not possible, do A* search
         frontier = []
         heapq.heappush(frontier, (0, start_grid))
         came_from = {start_grid: None}
         cost_so_far = {start_grid: 0}
 
-        print("Starting pathfinding loop...")
-
         while frontier:
             current = heapq.heappop(frontier)[1]
-            print(f"Exploring node: {current}")
 
             if current == goal_grid:
-                print("Goal reached!")
                 break
 
             for next in self.get_neighbors(current):
-                # Calculate movement cost (diagonal movement costs more)
-                dx = abs(next[0] - current[0])
-                dy = abs(next[1] - current[1])
-                movement_cost = 1.4 if dx + dy == 2 else 1.0
-
-                new_cost = cost_so_far[current] + movement_cost
+                new_cost = cost_so_far[current] + self.heuristic(current, next)
 
                 if next not in cost_so_far or new_cost < cost_so_far[next]:
                     cost_so_far[next] = new_cost
                     priority = new_cost + self.heuristic(next, goal_grid)
                     heapq.heappush(frontier, (priority, next))
                     came_from[next] = current
-                    print(f"Added node {next} to frontier with priority {priority}")
 
         # Reconstruct path
         if goal_grid not in came_from:
-            print("No path found!")
             return []  # No path found
 
         path = []
         current = goal_grid
         while current is not None:
-            # Convert back to world coordinates
             world_coords = self.world_map.grid_to_world(current[0], current[1])
             path.append(world_coords)
             current = came_from[current]
 
         path.reverse()
-        print(f"Found path: {path}")
-        return path
+        return self.optimize_path(path)
 
-    def smooth_path(self, path: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
-        """Smooth path to make it more drivable"""
+    def optimize_path(self, path: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+        """Optimize path by removing unnecessary waypoints"""
         if len(path) <= 2:
             return path
 
-        smoothed = [path[0]]
+        # Start with the first point
+        optimized = [path[0]]
+        current_idx = 0
 
-        # Use path smoothing to reduce unnecessary turns
-        for i in range(1, len(path) - 1):
-            prev = path[i - 1]
-            curr = path[i]
-            next = path[i + 1]
+        while current_idx < len(path) - 1:
+            # Look ahead as far as possible while maintaining clear path
+            for look_ahead_idx in range(len(path) - 1, current_idx, -1):
+                start = path[current_idx]
+                end = path[look_ahead_idx]
 
-            # Calculate angles
-            angle1 = math.atan2(curr[1] - prev[1], curr[0] - prev[0])
-            angle2 = math.atan2(next[1] - curr[1], next[0] - curr[0])
+                # Convert to grid coordinates for collision checking
+                start_grid = self.world_map.world_to_grid(start[0], start[1])
+                end_grid = self.world_map.world_to_grid(end[0], end[1])
 
-            # If turn is less than 45 degrees, skip middle point
-            if abs(angle1 - angle2) < math.pi / 4:
-                continue
+                if self.is_path_clear(start_grid[0], start_grid[1], end_grid[0], end_grid[1]):
+                    optimized.append(end)
+                    current_idx = look_ahead_idx
+                    break
 
-            smoothed.append(curr)
+            current_idx += 1
 
-        smoothed.append(path[-1])
-        return smoothed
+        return optimized
