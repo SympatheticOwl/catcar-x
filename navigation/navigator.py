@@ -166,23 +166,28 @@ class PicarXNavigator:
         }
 
 
-def main():
-    # avoider = AsyncObstacleAvoidance()
-    px = PicarXWrapper()
+# def main():
+#     avoider = AsyncObstacleAvoidance()
+#
+#     try:
+#         loop = asyncio.get_event_loop()
+#         runner = loop.create_task(avoider.run())
+#         loop.run_until_complete(runner)
+#     except KeyboardInterrupt:
+#         print("\nKeyboard interrupt received")
+#         runner.cancel()
+#         loop.run_until_complete(runner)
+#     finally:
+#         loop.close()
 
-    try:
-        loop = asyncio.get_event_loop()
-        # runner = loop.create_task(avoider.run())
-        runner = loop.create_task(px.navigate_to_point(100, 50))
-        loop.run_until_complete(runner)
-    except KeyboardInterrupt:
-        print("\nKeyboard interrupt received")
-        runner.cancel()
-        loop.run_until_complete(runner)
-    finally:
-        pos = px.get_position()
-        print(f"Final position: x={pos['x']}, y={pos['y']}, heading={pos['heading']}")
-        loop.close()
+async def main():
+    px = PicarXWrapper()
+    await px.navigate_to_point(100, 0)  # Forward 100cm
+    await px.navigate_to_point(100, 100)  # Right 100cm
+    await px.navigate_to_point(0, 100)  # Back 100cm
+    await px.navigate_to_point(0, 0)  # Left 100cm
+    pos = px.get_position()
+    print(f"Final position: x={pos['x']}, y={pos['y']}, heading={pos['heading']}")
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
