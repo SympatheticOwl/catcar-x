@@ -276,6 +276,76 @@ class AsyncObstacleAvoidance:
 
             await asyncio.sleep(0.1)
 
+    async def navigate_to_goal(self, target_x: float, target_y: float):
+        """Main navigation loop with dynamic replanning"""
+        self.is_navigating = True
+        self.target_x = target_x
+        self.target_y = target_y
+
+        while self.is_navigating:
+            current_time = time.time()
+
+            # Get current position in grid coordinates
+            current_pos = self.px.get_position()
+            start_grid_x, start_grid_y = self.world_map.world_to_grid(
+                current_pos['x'], current_pos['y'])
+            goal_grid_x, goal_grid_y = self.world_map.world_to_grid(
+                target_x, target_y)
+
+            # Check if we've reached the goal
+            distance_to_goal = math.sqrt(
+                (current_pos['x'] - target_x) ** 2 +
+                (current_pos['y'] - target_y) ** 2)
+            if distance_to_goal < 5:  # 5cm threshold
+                print("Reached goal!")
+                self.is_navigating = False
+                self.px.stop()
+                break
+
+            # Replan if needed
+            if (current_time - self.last_plan_time > self.pathfinder.replan_interval or
+                    not self.current_path or
+                    self.current_path_index >= len(self.current_path)):
+
+                # Find new path
+                new_path = self.pathfinder.find_path(
+                    (start_grid_x, start_grid_y),
+                    (goal_grid_x, goal_grid_y)
+                )
+
+                if new_path is None:
+                    print("No valid path found!")
+                    self.is_navigating = False
+                    self.px.stop()
+                    break
+
+                # Smooth and update path
+                self.current_path = self.pathfinder.smooth_path(new_path)
+                self.current_path_index = 0
+                self.last_plan_time = current_time
+
+            # Get next few waypoints to follow
+            current_segment = self.current_path[
+                              self.current_path_index:
+                              self.current_path_index + self.pathfinder.path_segment_length]
+
+            # Follow path segment
+            for waypoint in current_segment:
+                # Convert grid coordinates back to world coordinates
+                way_x, way_y = self.world_map.grid_to_world(*waypoint)
+
+                # Check for obstacles before moving
+                vision_clear = await self.pathfinder.check_vision_obstacles()
+                if not vision_clear:
+                    continue
+
+                # Navigate to waypoint
+                print(f"Moving to waypoint: ({way_x:.1f}, {way_y:.1f})")
+                await self.px.navigate_to_point(way_x, way_y)
+                self.current_path_index += 1
+
+            await asyncio.sleep(0.1)
+
     async def run(self):
         print("Starting enhanced obstacle avoidance program...")
         tasks = []
