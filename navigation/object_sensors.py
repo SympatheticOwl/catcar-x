@@ -51,6 +51,9 @@ class AsyncObstacleAvoidance:
         self.navigation_task = None
         self.is_navigating = False
 
+        self.current_path = []
+        self.current_path_index = 0
+
     def _update_ultrasonic_detection(self, distance: float):
         """Update map with obstacle detected by ultrasonic sensor"""
         if not (0 < distance < 300):  # Ignore invalid readings
