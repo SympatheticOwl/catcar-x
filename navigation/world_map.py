@@ -18,11 +18,11 @@ class WorldMap:
         self.origin = np.array([self.grid_size // 2, self.grid_size // 2])
 
         # Obstacle tracking
-        self.obstacles: Dict[str, Dict] = {}  # Track individual obstacles
+        self.obstacles = {}  # Track individual obstacles
         self.obstacle_id_counter = 0
 
         self.padding_size = 2  # Number of cells to pad around obstacles
-        self.padding_structure = np.ones((2, 2))  # 3x3 structuring element for dilation
+        self.padding_structure = np.ones((2, 2))  # 2x2 structuring element for dilation
 
     def world_to_grid(self, x: float, y: float) -> Tuple[int, int]:
         """Convert world coordinates (cm) to grid coordinates"""
@@ -73,26 +73,30 @@ class WorldMap:
         grid_x, grid_y = self.world_to_grid(x, y)
         grid_radius = int(radius / self.resolution)
 
-        # Create a circle mask
-        y_indices, x_indices = np.ogrid[-grid_radius:grid_radius + 1, -grid_radius:grid_radius + 1]
-        mask = x_indices ** 2 + y_indices ** 2 <= grid_radius ** 2
-
         # Calculate grid boundaries
         x_min = max(0, grid_x - grid_radius)
         x_max = min(self.grid_size, grid_x + grid_radius + 1)
         y_min = max(0, grid_y - grid_radius)
         y_max = min(self.grid_size, grid_y + grid_radius + 1)
 
-        # Apply mask to grid
-        mask_height, mask_width = mask.shape
-        grid_height = y_max - y_min
-        grid_width = x_max - x_min
+        # Create a circle mask of the correct size
+        y_size = y_max - y_min
+        x_size = x_max - x_min
+        if y_size <= 0 or x_size <= 0:
+            return  # Skip if dimensions are invalid
 
-        # Trim mask if needed
-        mask = mask[:grid_height, :grid_width]
+        y_indices, x_indices = np.ogrid[:y_size, :x_size]
 
-        # Update grid
-        self.grid[y_min:y_max, x_min:x_max][mask] = 1
+        # Adjust indices to be centered on the obstacle
+        center_y = grid_y - y_min
+        center_x = grid_x - x_min
+        circle_mask = (x_indices - (x_size // 2)) ** 2 + (y_indices - (y_size // 2)) ** 2 <= grid_radius ** 2
+
+        # Update grid using the correctly sized mask
+        self.grid[y_min:y_max, x_min:x_max] = np.logical_or(
+            self.grid[y_min:y_max, x_min:x_max],
+            circle_mask
+        ).astype(np.uint8)
 
     def update_obstacle_position(self, obstacle_id: str, new_x: float, new_y: float):
         """Update position of a tracked obstacle"""
@@ -121,18 +125,20 @@ class WorldMap:
         y_min = max(0, grid_y - grid_radius)
         y_max = min(self.grid_size, grid_y + grid_radius + 1)
 
-        self.grid[y_min:y_max, x_min:x_max] = 0
+        if y_max > y_min and x_max > x_min:  # Ensure valid dimensions
+            self.grid[y_min:y_max, x_min:x_max] = 0
 
     def add_padding(self):
-        # Apply padding
+        """Add padding around obstacles"""
+        # Apply padding using binary dilation
         self.grid = ndimage.binary_dilation(
             self.grid,
             structure=self.padding_structure,
             iterations=self.padding_size
-        )
+        ).astype(np.uint8)
 
         print("\nCurrent Map (with padding):")
-        self.world_map.visualize_map()
+        self.visualize_map()
 
     def visualize_map(self):
         """Print ASCII visualization of the map"""
