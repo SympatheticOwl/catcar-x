@@ -311,7 +311,7 @@ class AsyncObstacleAvoidance:
         """Navigate to target coordinates while avoiding obstacles using forward_movement"""
         self.is_navigating = True
         current_path = None
-        current_waypoint_idx = 1  # Skip first waypoint (current position)
+        current_waypoint_idx = 0  # Start at beginning of path
         movement_task = None
 
         try:
@@ -344,19 +344,27 @@ class AsyncObstacleAvoidance:
                         (current_x, current_y),
                         (target_x, target_y)
                     )
-                    if not current_path:
+
+                    # Validate path
+                    if not current_path or len(current_path) < 2:
                         print("No valid path found. Scanning environment...")
                         self.px.stop()
                         await self.scan_environment()
                         await asyncio.sleep(1)
                         continue
-                    current_waypoint_idx = 1
-                    print(f"New path planned: {current_path}")
+
+                    current_waypoint_idx = 1  # Start with first waypoint after current position
+                    print(f"New path planned with {len(current_path)} points: {current_path}")
+
+                # Validate waypoint index
+                if current_waypoint_idx >= len(current_path):
+                    print("Reached end of current path, replanning...")
+                    current_path = None
+                    continue
 
                 # Get current waypoint
-                if current_waypoint_idx >= len(current_path):
-                    current_waypoint_idx = len(current_path) - 1
                 waypoint_x, waypoint_y = current_path[current_waypoint_idx]
+                print(f"Current waypoint {current_waypoint_idx}: ({waypoint_x}, {waypoint_y})")
 
                 # Check distance to current waypoint
                 distance_to_waypoint = math.sqrt(
@@ -365,10 +373,14 @@ class AsyncObstacleAvoidance:
 
                 # Move to next waypoint if we've reached the current one
                 if distance_to_waypoint < 5:  # 5cm threshold
+                    print(f"Reached waypoint {current_waypoint_idx}")
                     current_waypoint_idx += 1
                     if current_waypoint_idx >= len(current_path):
-                        continue  # Will trigger new path planning
+                        print("Completed current path, replanning...")
+                        current_path = None
+                        continue
                     waypoint_x, waypoint_y = current_path[current_waypoint_idx]
+                    print(f"Moving to next waypoint {current_waypoint_idx}: ({waypoint_x}, {waypoint_y})")
 
                 # Calculate angle to waypoint
                 dx = waypoint_x - current_x
