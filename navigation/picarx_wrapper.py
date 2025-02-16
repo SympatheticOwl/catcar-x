@@ -38,7 +38,7 @@ class PicarXWrapper:
     async def scan_avg(self):
         distances = []
         for _ in range(3):
-            dist = self.px.px.ultrasonic.read()
+            dist = self.px.ultrasonic.read()
             if dist and 0 < dist < 300:
                 distances.append(dist)
             else:
