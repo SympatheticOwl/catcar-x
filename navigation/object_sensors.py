@@ -14,7 +14,7 @@ class AsyncObstacleAvoidance:
         # World mapping
         self.world_map = WorldMap(map_size=200, resolution=1.0)  # 4m x 4m map, 1cm resolution
         self.px = PicarXWrapper()
-        self.pathfinder = Pathfinder(self.world_map)
+        self.pathfinder = Pathfinder(self.world_map, self.px)
 
         # Sensor offsets from center
         self.ULTRASONIC_OFFSET_X = 5.0  # cm forward
@@ -384,7 +384,7 @@ class AsyncObstacleAvoidance:
             ultrasonic_task = asyncio.create_task(self.ultrasonic_monitoring())
             cliff_task = asyncio.create_task(self.cliff_monitoring())
             # movement_task = asyncio.create_task(self.forward_movement())
-            navigation_task = asyncio.create_task(self.px.navigate_to_point(100, 50))
+            navigation_task = asyncio.create_task(self.pathfinder.navigate_to_target(100, 50))
             tasks = [pos_track_task, vision_task, ultrasonic_task, cliff_task, navigation_task]
             await asyncio.gather(*tasks)
         except asyncio.CancelledError:
