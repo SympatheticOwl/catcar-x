@@ -33,7 +33,9 @@ class PicarXWrapper:
         self.NINETY_DEG_TURN_TIME = 2.5  # Time to complete a 90-degree turn
         self.TURN_RATE = 90 / self.NINETY_DEG_TURN_TIME  # degrees per second at max steering
 
-        asyncio.create_task(self._continuous_position_tracking())
+        loop = asyncio.get_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(self._continuous_position_tracking())
 
     def _speed_to_cm_per_sec(self, speed_value):
         """Convert motor speed value to cm/s"""
