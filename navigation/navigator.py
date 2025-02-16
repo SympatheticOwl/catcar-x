@@ -183,9 +183,9 @@ class PicarXNavigator:
 async def main():
     px = PicarXWrapper()
     await px.navigate_to_point(100, 0)  # Forward 100cm
-    # await px.navigate_to_point(100, 100)  # Right 100cm
-    # await px.navigate_to_point(0, 100)  # Back 100cm
-    # await px.navigate_to_point(0, 0)  # Left 100cm
+    await px.navigate_to_point(100, 100)  # Right 100cm
+    await px.navigate_to_point(0, 100)  # Back 100cm
+    await px.navigate_to_point(0, 0)  # Left 100cm
     pos = px.get_position()
     print(f"Final position: x={pos['x']}, y={pos['y']}, heading={pos['heading']}")
 
