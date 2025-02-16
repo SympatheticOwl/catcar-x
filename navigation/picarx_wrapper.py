@@ -54,12 +54,12 @@ class PicarXWrapper:
     def check_path_clear(self, distance: float) -> bool:
         """Check if path is clear for given distance"""
         distances = self.scan_avg()
-        if distances is None:
-            return False
+        if distances:
+            # Convert intended movement distance to cm for comparison
+            distance_cm = distance * 30.48  # feet to cm
+            return (sum(distances) / len(distances)) > min(distance_cm, self.min_safe_distance)
+        return False
 
-        # Convert intended movement distance to cm for comparison
-        distance_cm = distance * 30.48  # feet to cm
-        return (sum(distances)/len(distances)) > min(distance_cm, self.min_safe_distance)
 
     async def move_distance(self, distance: float) -> bool:
         """
