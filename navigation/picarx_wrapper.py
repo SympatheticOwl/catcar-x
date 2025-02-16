@@ -39,7 +39,7 @@ class PicarXWrapper:
         rpm = (abs(speed_value) / self.MAX_MOTOR_SPEED) * self.MAX_RPM
         return (rpm * self.WHEEL_CIRCUMFERENCE) / 60
 
-    def continuous_position_tracking(self):
+    async def continuous_position_tracking(self):
         """Continuously update position based on movement"""
         while True:
             current_time = time.time()
