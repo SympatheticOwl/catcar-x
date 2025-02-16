@@ -123,7 +123,7 @@ class AsyncObstacleAvoidance:
 
         for angle in range(start_angle, end_angle + 1, self.scan_step):
             self.px.set_cam_pan_angle(angle)
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.05)
             await self.scan_avg()
 
         self.px.set_cam_pan_angle(0)
