@@ -43,7 +43,11 @@ class Pathfinder:
         """Find path from start to target in world coordinates"""
         # Convert world coordinates to grid coordinates
         start_grid = self.world_map.world_to_grid(start_x, start_y)
+        print(f'start_x: {start_x}, start_y: {start_y}')
+        print(f'start_grid: {start_grid}')
         target_grid = self.world_map.world_to_grid(target_x, target_y)
+        print(f'target_x: {target_x}, target_y: {target_y}')
+        print(f'target_grid: {target_grid}')
 
         # Initialize data structures
         frontier = []
@@ -52,6 +56,7 @@ class Pathfinder:
         cost_so_far = {start_grid: 0}
 
         while frontier:
+            print('frontier...')
             current = heappop(frontier)[1]
 
             if current == target_grid:
@@ -75,6 +80,7 @@ class Pathfinder:
         path = []
 
         while current is not None:
+            print(f'current: {current}')
             # Convert grid coordinates back to world coordinates
             world_coords = self.world_map.grid_to_world(current[0], current[1])
             path.append(world_coords)
