@@ -174,7 +174,6 @@ class AsyncObstacleAvoidance:
         return best_angle, max_distance
 
     async def evasive_maneuver(self):
-
         try:
             self.is_moving = False
             self.px.forward(0)

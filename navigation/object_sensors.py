@@ -144,11 +144,13 @@ class AsyncObstacleAvoidance:
 
     async def emergency_stop(self):
         self.emergency_stop_flag = True
-        if self.current_maneuver and not self.is_backing_up:
+        # cancel any ongoing maneuver except backup
+        if self.current_maneuver:
             self.current_maneuver.cancel()
 
         self.is_moving = False
-        self.px.stop()
+        self.px.px.forward(0)
+        self.px.px.set_dir_servo_angle(0)
         await asyncio.sleep(0.5)
         self.emergency_stop_flag = False
         self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
@@ -193,6 +195,7 @@ class AsyncObstacleAvoidance:
 
             # Find best direction using wrapper's position tracking
             current_pos = self.px.get_position()
+            print(f"Current Position: {current_pos}")
             best_angle = self.find_best_direction(scan_data, current_pos)
 
             print("Backing up...")
