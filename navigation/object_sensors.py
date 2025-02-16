@@ -186,9 +186,40 @@ class AsyncObstacleAvoidance:
         max_distance = 0
         best_angle = 0
 
-        for angle, distance in self.world_map.grid:
-            if distance > max_distance:
-                max_distance = distance
+        # Convert current position to grid coordinates
+        curr_pos = self.px.get_position()
+        curr_grid_x, curr_grid_y = self.world_map.world_to_grid(curr_pos['x'], curr_pos['y'])
+
+        # Check angles in scan range
+        start_angle, end_angle = self.scan_range
+        for angle in range(start_angle, end_angle + 1, self.scan_step):
+            # Convert angle to radians
+            angle_rad = math.radians(angle)
+
+            # Look ahead in this direction (check multiple distances)
+            max_check_distance = 100  # cm
+            check_step = 5  # cm
+
+            # Find distance to first obstacle in this direction
+            distance_to_obstacle = max_check_distance
+
+            for dist in range(check_step, max_check_distance, check_step):
+                # Calculate point to check in grid coordinates
+                check_x = curr_grid_x + int(dist * math.cos(angle_rad) / self.world_map.resolution)
+                check_y = curr_grid_y + int(dist * math.sin(angle_rad) / self.world_map.resolution)
+
+                # Ensure within grid bounds
+                if (0 <= check_x < self.world_map.grid_size and
+                        0 <= check_y < self.world_map.grid_size):
+
+                    # If we hit an obstacle, record distance and stop checking this direction
+                    if self.world_map.grid[check_y, check_x] != 0:
+                        distance_to_obstacle = dist
+                        break
+
+            # Update best direction if this is the clearest path
+            if distance_to_obstacle > max_distance:
+                max_distance = distance_to_obstacle
                 best_angle = angle
 
         return best_angle, max_distance
