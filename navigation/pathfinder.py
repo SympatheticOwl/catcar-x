@@ -9,134 +9,157 @@ from picarx_wrapper import PicarXWrapper
 from world_map import WorldMap
 
 
+class Node:
+    def __init__(self, x: int, y: int, g_cost: float = float('inf'),
+                 h_cost: float = 0, parent=None):
+        self.x = x
+        self.y = y
+        self.g_cost = g_cost  # Cost from start to current node
+        self.h_cost = h_cost  # Estimated cost from current node to goal
+        self.f_cost = g_cost + h_cost  # Total cost
+        self.parent = parent
+
+    def __lt__(self, other):
+        return self.f_cost < other.f_cost
+
+    def __eq__(self, other):
+        return self.x == other.x and self.y == other.y
+
+    def __hash__(self):
+        return hash((self.x, self.y))
+
+
 class Pathfinder:
-    def __init__(self, world_map: WorldMap, picar: PicarXWrapper):
+    def __init__(self, world_map):
         self.world_map = world_map
-        self.picar = picar
-        self.grid_size = 42  # cm per grid cell
-        self.path = []
-        self.current_target = None
+        self.directions = [
+            (-1, -1), (-1, 0), (-1, 1),
+            (0, -1), (0, 1),
+            (1, -1), (1, 0), (1, 1)
+        ]
+        self.min_turn_radius = 20  # cm, approximate minimum turning radius
+        self.path_smoothing_iterations = 3
 
-    def _heuristic(self, a: Tuple[int, int], b: Tuple[int, int]) -> float:
-        """Manhattan distance heuristic"""
-        return abs(a[0] - b[0]) + abs(a[1] - b[1])
-
-    def _get_neighbors(self, pos: Tuple[int, int]) -> List[Tuple[int, int]]:
-        """Get valid neighboring grid cells"""
-        x, y = pos
+    def get_neighbors(self, node: Node) -> List[Node]:
+        """Get valid neighboring nodes considering turning radius constraints"""
         neighbors = []
+        for dx, dy in self.directions:
+            new_x = node.x + dx
+            new_y = node.y + dy
 
-        # Check 8 surrounding cells
-        for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0), (1, 1), (-1, 1), (1, -1), (-1, -1)]:
-            new_x, new_y = x + dx, y + dy
+            # Check grid bounds
+            if (0 <= new_x < self.world_map.grid_size and
+                    0 <= new_y < self.world_map.grid_size):
 
-            # Check bounds
-            if 0 <= new_x < self.world_map.grid_size and 0 <= new_y < self.world_map.grid_size:
                 # Check if cell is obstacle-free
                 if not self.world_map.grid[new_y, new_x]:
-                    neighbors.append((new_x, new_y))
+                    # Convert to world coordinates
+                    world_x, world_y = self.world_map.grid_to_world(new_x, new_y)
+                    world_current_x, world_current_y = self.world_map.grid_to_world(node.x, node.y)
+
+                    # Calculate angle change
+                    if node.parent:
+                        parent_x, parent_y = self.world_map.grid_to_world(node.parent.x, node.parent.y)
+                        angle1 = math.atan2(world_current_y - parent_y, world_current_x - parent_x)
+                        angle2 = math.atan2(world_y - world_current_y, world_x - world_current_x)
+                        angle_change = abs(angle2 - angle1)
+
+                        # Skip if angle change is too sharp for turning radius
+                        if angle_change > math.pi / 4:  # 45 degrees
+                            continue
+
+                    neighbors.append(Node(new_x, new_y))
 
         return neighbors
 
-    def find_path(self, start_pos: Tuple[float, float], target_pos: Tuple[float, float]) -> List[Tuple[int, int]]:
-        """Find path using A* algorithm, converting between world and grid coordinates"""
+    def heuristic(self, node: Node, goal: Node) -> float:
+        """Calculate heuristic cost using Euclidean distance"""
+        return math.sqrt((node.x - goal.x) ** 2 + (node.y - goal.y) ** 2)
+
+    def find_path(self, start_x: float, start_y: float,
+                  goal_x: float, goal_y: float) -> List[Tuple[float, float]]:
+        """Find path from start to goal using A* algorithm"""
         # Convert world coordinates to grid coordinates
-        start_grid = self.world_map.world_to_grid(*start_pos)
-        target_grid = self.world_map.world_to_grid(*target_pos)
+        start_grid_x, start_grid_y = self.world_map.world_to_grid(start_x, start_y)
+        goal_grid_x, goal_grid_y = self.world_map.world_to_grid(goal_x, goal_y)
 
-        # Initialize data structures
-        frontier = []
-        heappush(frontier, (0, start_grid))
-        came_from = {start_grid: None}
-        cost_so_far = {start_grid: 0}
+        start_node = Node(start_grid_x, start_grid_y, g_cost=0)
+        goal_node = Node(goal_grid_x, goal_grid_y)
 
-        while frontier:
-            current = heappop(frontier)[1]
+        # Initialize open and closed sets
+        open_set = []
+        closed_set = set()
 
-            if current == target_grid:
-                break
+        # Add start node to open set
+        start_node.h_cost = self.heuristic(start_node, goal_node)
+        heapq.heappush(open_set, start_node)
 
-            for next_pos in self._get_neighbors(current):
-                # Calculate movement cost (diagonal movements cost more)
-                dx = abs(next_pos[0] - current[0])
-                dy = abs(next_pos[1] - current[1])
-                movement_cost = 1.4 if dx + dy == 2 else 1.0
+        while open_set:
+            current = heapq.heappop(open_set)
 
-                new_cost = cost_so_far[current] + movement_cost
+            if (current.x, current.y) == (goal_node.x, goal_node.y):
+                return self._reconstruct_path(current)
 
-                if next_pos not in cost_so_far or new_cost < cost_so_far[next_pos]:
-                    cost_so_far[next_pos] = new_cost
-                    priority = new_cost + self._heuristic(target_grid, next_pos)
-                    heappush(frontier, (priority, next_pos))
-                    came_from[next_pos] = current
+            closed_set.add((current.x, current.y))
 
-        # Reconstruct path
+            for neighbor in self.get_neighbors(current):
+                if (neighbor.x, neighbor.y) in closed_set:
+                    continue
+
+                # Calculate new g_cost
+                movement_cost = math.sqrt((neighbor.x - current.x) ** 2 +
+                                          (neighbor.y - current.y) ** 2)
+                new_g_cost = current.g_cost + movement_cost
+
+                # If this path is better than previous ones
+                if neighbor not in open_set or new_g_cost < neighbor.g_cost:
+                    neighbor.g_cost = new_g_cost
+                    neighbor.h_cost = self.heuristic(neighbor, goal_node)
+                    neighbor.f_cost = neighbor.g_cost + neighbor.h_cost
+                    neighbor.parent = current
+
+                    if neighbor not in open_set:
+                        heapq.heappush(open_set, neighbor)
+
+        return []  # No path found
+
+    def _reconstruct_path(self, goal_node: Node) -> List[Tuple[float, float]]:
+        """Reconstruct the path from goal to start"""
         path = []
-        current = target_grid
-        while current is not None:
-            path.append(current)
-            current = came_from.get(current)
+        current = goal_node
+
+        while current:
+            # Convert grid coordinates back to world coordinates
+            world_x, world_y = self.world_map.grid_to_world(current.x, current.y)
+            path.append((world_x, world_y))
+            current = current.parent
 
         path.reverse()
-        return path if path else []
+        return self._smooth_path(path)
 
-    async def navigate_to_target(self, target_x: float, target_y: float):
-        """Navigate to target position while avoiding obstacles"""
-        self.current_target = (target_x, target_y)
+    def _smooth_path(self, path: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+        """Apply path smoothing to reduce sharp turns"""
+        if len(path) <= 2:
+            return path
 
-        while True:
-            # Get current position
-            pos = self.picar.get_position()
-            current_pos = (pos['x'], pos['y'])
+        for _ in range(self.path_smoothing_iterations):
+            i = 1
+            while i < len(path) - 1:
+                prev_x, prev_y = path[i - 1]
+                curr_x, curr_y = path[i]
+                next_x, next_y = path[i + 1]
 
-            # Check if we've reached the target
-            distance_to_target = math.sqrt(
-                (current_pos[0] - target_x) ** 2 +
-                (current_pos[1] - target_y) ** 2
-            )
-            if distance_to_target < self.grid_size / 2:
-                print(f"Reached target position: ({target_x}, {target_y})")
-                self.picar.stop()
-                return True
+                # Calculate angles
+                angle1 = math.atan2(curr_y - prev_y, curr_x - prev_x)
+                angle2 = math.atan2(next_y - curr_y, next_x - curr_x)
+                angle_diff = abs(angle2 - angle1)
 
-            # Find path to target
-            path = self.find_path(current_pos, (target_x, target_y))
-            if not path:
-                print("No valid path found to target!")
-                self.picar.stop()
-                return False
+                # If turn is too sharp, interpolate a new point
+                if angle_diff > math.pi / 4:
+                    new_x = (prev_x + next_x) / 2
+                    new_y = (prev_y + next_y) / 2
+                    path[i] = (new_x, new_y)
 
-            # Get next waypoint
-            next_waypoint = self.world_map.grid_to_world(*path[1]) if len(path) > 1 else (target_x, target_y)
+                i += 1
 
-            # Check vision system for obstacles
-            objects = self.picar.vision.get_obstacle_info()
-            if objects:
-                for obj in objects:
-                    if obj['label'] in ['person', 'cat']:
-                        print(f"Detected {obj['label']}, waiting...")
-                        self.picar.stop()
-                        await asyncio.sleep(1)  # Check again in 1 second
-                        continue
-                    elif obj['label'] == 'stop sign':
-                        print("Stop sign detected, waiting 3 seconds")
-                        self.picar.stop()
-                        await asyncio.sleep(3)
-
-            # Navigate to next waypoint
-            try:
-                await self.picar.navigate_to_point(next_waypoint[0], next_waypoint[1])
-            except asyncio.CancelledError:
-                self.picar.stop()
-                raise
-
-            await asyncio.sleep(0.1)  # Control loop rate
-
-    def update_path(self):
-        """Update path based on new obstacle information"""
-        if self.current_target:
-            pos = self.picar.get_position()
-            current_pos = (pos['x'], pos['y'])
-            self.path = self.find_path(current_pos, self.current_target)
-            return bool(self.path)
-        return False
+        return path
