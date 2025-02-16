@@ -322,6 +322,8 @@ class AsyncObstacleAvoidance:
 
                 # Follow the path
                 for waypoint_x, waypoint_y in smoothed_path[1:]:  # Skip first point (current position)
+                    position = self.px.get_position()
+                    print(f'current pos: {position}')
                     print(f"\nNavigating to waypoint: ({waypoint_x}, {waypoint_y})")
 
                     # Check for obstacles detected by vision system
@@ -334,14 +336,55 @@ class AsyncObstacleAvoidance:
                             for obj in objects:
                                 if obj['label'] in ['person', 'cat']:
                                     print(f"Waiting for {obj['label']} to move...")
+                                    print("DON'T HIT THE CAT!!!!")
                                     self.px.stop()
                                     await asyncio.sleep(1)  # Check again in 1 second
                                     continue
 
                                 elif obj['label'] == 'stop sign':
                                     print("Stop sign detected! Waiting 3 seconds...")
+                                    print("STOP SIGN!!!!")
                                     self.px.stop()
                                     await asyncio.sleep(3)
+
+                    if not self.emergency_stop_flag and not self.current_maneuver:
+                        # Check both ultrasonic and vision systems
+                        if self.vision_enabled:
+                            objects = self.vision.get_obstacle_info()
+                            if objects:
+                                self._update_vision_detections(objects)
+                                for obj in objects:
+                                    print(f"Vision system detected: {obj['label']}")
+                                    if obj['label'] == "stop sign":
+                                        print("STOP!!!!")
+                                        self.vision_clear = False
+
+                        if (self.current_distance >= self.min_distance and not self.is_cliff):
+                            if not self.is_moving:
+                                print("Moving forward...")
+                                self.is_moving = True
+                                self.px.forward(self.speed)
+                        else:
+                            if self.is_moving:
+                                if self.is_cliff:
+                                    print("Cliff detected!")
+                                elif not self.vision_clear:
+                                    print("Vision system detected obstacle!")
+                                else:
+                                    print(f"Ultrasonic detected obstacle at {self.current_distance:.1f}cm")
+                                self.is_moving = False
+                                self.px.forward(0)
+                                self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
+
+                    # Periodically visualize the map (for debugging)
+                    if time.time() % 5 < 0.1:  # Every 5 seconds
+                        print("\nCurrent World Map:")
+                        self.world_map.visualize_map()
+                        pos = self.px.get_position()
+                        print(f"Position: x={pos['x']:.1f}, y={pos['y']:.1f}, heading={pos['heading']:.1f}°")
+
+
+
 
                     # Navigate to waypoint
                     success = await self.px.navigate_to_point(waypoint_x, waypoint_y)
