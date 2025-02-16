@@ -1,4 +1,3 @@
-import asyncio
 import math
 import time
 from picarx import Picarx
@@ -113,72 +112,6 @@ class PicarXWrapper:
 
                 # Normalize heading to 0-360 degrees
                 self.heading = self.heading % 360
-
-    def _calculate_target_angle(self, target_x, target_y):
-        """Calculate angle to target point relative to current position"""
-        dx = target_x - self.x
-        dy = target_y - self.y
-
-        # Calculate absolute angle to target
-        target_angle = math.degrees(math.atan2(dy, dx)) % 360
-
-        # Calculate relative angle from current heading
-        relative_angle = target_angle - self.heading
-
-        # Normalize to -180 to 180 degrees
-        if relative_angle > 180:
-            relative_angle -= 360
-        elif relative_angle < -180:
-            relative_angle += 360
-
-        return relative_angle
-
-    def _distance_to_target(self, target_x, target_y):
-        """Calculate distance to target point"""
-        dx = target_x - self.x
-        dy = target_y - self.y
-        return math.sqrt(dx * dx + dy * dy)
-
-    async def navigate_to_point(self, target_x, target_y):
-        """Navigate to a target point using a simple point-to-point approach"""
-        print(f"Navigating to point ({target_x}, {target_y})")
-
-        while True:
-            self._update_position()
-            current_pos = self.get_position()
-            distance = self._distance_to_target(target_x, target_y)
-
-            # Check if we've reached the target
-            if distance < self.POSITION_TOLERANCE:
-                self.stop()
-                print(f"Reached target! Final position: ({current_pos['x']}, {current_pos['y']})")
-                return True
-
-            # Calculate angle to target
-            target_angle = self._calculate_target_angle(target_x, target_y)
-
-            # First, adjust heading if needed
-            if abs(target_angle) > self.HEADING_TOLERANCE:
-                # Stop forward motion to turn
-                self.stop()
-
-                # Set steering angle (clamped to max)
-                turn_angle = max(-self.MAX_STEERING_ANGLE,
-                                 min(self.MAX_STEERING_ANGLE, target_angle))
-                self.set_dir_servo_angle(turn_angle)
-
-                # Move slowly while turning
-                self.forward(self.TURN_SPEED)
-                print(f"Adjusting heading: {turn_angle:.1f}° (Target: {target_angle:.1f}°)")
-
-            else:
-                # We're pointed at the target, move forward
-                self.set_dir_servo_angle(0)
-                self.forward(self.DEFAULT_SPEED)
-                print(f"Moving to target. Distance: {distance:.1f}cm")
-
-            # Small delay to allow movement and position updates
-            await asyncio.sleep(0.1)
 
     def get_position(self):
         """Get current position and heading"""

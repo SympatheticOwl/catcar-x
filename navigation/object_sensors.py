@@ -249,10 +249,6 @@ class AsyncObstacleAvoidance:
 
             await asyncio.sleep(0.1)
 
-    async def run_navigation_test(self):
-        # Navigate to point 100cm ahead and 50cm to the right
-        await self.px.navigate_to_point(100, 50)
-
     async def run(self):
         print("Starting enhanced obstacle avoidance program...")
         tasks = []
