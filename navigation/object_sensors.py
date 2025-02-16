@@ -111,6 +111,7 @@ class AsyncObstacleAvoidance:
                 distances.append(dist)
             await asyncio.sleep(0.01)
 
+        print(f'distances: {distances}')
         if distances:
             self._update_ultrasonic_detection(sum(distances) / len(distances))
         return distances
