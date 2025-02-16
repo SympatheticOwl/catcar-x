@@ -1,3 +1,4 @@
+import asyncio
 import math
 import time
 from picarx import Picarx
@@ -22,15 +23,13 @@ class PicarXWrapper:
         self.WHEELBASE = 9.7  # Distance between wheels in cm
         self.MAX_STEERING_ANGLE = 28  # Maximum steering angle in degrees
 
-        # Motor constants
+        # Motor and turning constants
         self.MAX_MOTOR_SPEED = 100  # Maximum motor speed value
         self.MAX_RPM = 150  # Approximate max RPM at full speed
-
-        # Navigation parameters
-        self.POSITION_TOLERANCE = 5.0  # cm
-        self.HEADING_TOLERANCE = 2.0  # degrees
-        self.DEFAULT_SPEED = 30  # Default movement speed
-        self.TURN_SPEED = 20  # Slower speed for turning
+        self.TURNING_SPEED = 30  # Standard speed for turning
+        self.MIN_TURN_RADIUS = self.WHEELBASE / math.tan(math.radians(self.MAX_STEERING_ANGLE))
+        self.NINETY_DEG_TURN_TIME = 2.0  # Time to complete a 90-degree turn
+        self.TURN_RATE = 90 / self.NINETY_DEG_TURN_TIME  # degrees per second at max steering
 
     def _speed_to_cm_per_sec(self, speed_value):
         """Convert motor speed value to cm/s"""
@@ -113,6 +112,101 @@ class PicarXWrapper:
                 # Normalize heading to 0-360 degrees
                 self.heading = self.heading % 360
 
+    async def navigate_to_point(self, target_x, target_y, speed=30):
+        """Navigate to a target point while accounting for turning radius"""
+        while True:
+            # Update current position
+            self._update_position()
+
+            # Calculate distance and angle to target
+            dx = target_x - self.x
+            dy = target_y - self.y
+            distance_to_target = math.sqrt(dx ** 2 + dy ** 2)
+
+            # If we're close enough to target, stop
+            if distance_to_target < 5:  # 5cm threshold
+                self.stop()
+                return True
+
+            # Calculate target angle in degrees
+            target_angle = math.degrees(math.atan2(dy, dx))
+            # Normalize target angle to 0-360
+            target_angle = target_angle % 360
+
+            # Calculate angle difference
+            angle_diff = target_angle - self.heading
+            # Normalize to -180 to 180
+            angle_diff = (angle_diff + 180) % 360 - 180
+
+            # Calculate minimum turning radius at current speed
+            current_min_radius = self.MIN_TURN_RADIUS
+
+            # If we need to turn more than our minimum turning radius allows
+            if abs(angle_diff) > 10:  # 10 degree threshold
+                await self._execute_turn(angle_diff)
+                continue
+
+            # Check if we can reach the target with our turning radius
+            if distance_to_target < current_min_radius:
+                # Need to approach from a different angle
+                await self._adjust_approach(target_x, target_y)
+                continue
+
+            # Move forward while continuously adjusting heading
+            self.forward(speed)
+            steering_angle = self._calculate_steering_angle(angle_diff)
+            self.set_dir_servo_angle(steering_angle)
+
+            await asyncio.sleep(0.1)  # Small delay for control loop
+
+    async def _execute_turn(self, angle_diff):
+        """Execute a turn of the specified angle"""
+        # Calculate turn duration based on angle
+        turn_duration = abs(angle_diff) / self.TURN_RATE
+
+        # Set maximum steering in appropriate direction
+        steering_angle = math.copysign(self.MAX_STEERING_ANGLE, angle_diff)
+        self.set_dir_servo_angle(steering_angle)
+
+        # Move at turning speed
+        if angle_diff > 0:
+            self.forward(self.TURNING_SPEED)
+        else:
+            self.backward(self.TURNING_SPEED)
+
+        # Wait for turn to complete
+        await asyncio.sleep(turn_duration)
+
+        # Straighten wheels and stop
+        self.set_dir_servo_angle(0)
+        self.stop()
+
+    async def _adjust_approach(self, target_x, target_y):
+        """Adjust approach when target is within minimum turning radius"""
+        # Calculate an intermediate point that's further away
+        dx = target_x - self.x
+        dy = target_y - self.y
+        distance = math.sqrt(dx ** 2 + dy ** 2)
+
+        # Move back to get more room
+        angle_to_target = math.atan2(dy, dx)
+        backup_x = self.x - (self.MIN_TURN_RADIUS * math.cos(angle_to_target))
+        backup_y = self.y - (self.MIN_TURN_RADIUS * math.sin(angle_to_target))
+
+        # Back up to the intermediate point
+        self.backward(self.TURNING_SPEED)
+        await asyncio.sleep(1.0)  # Back up for 1 second
+        self.stop()
+
+    def _calculate_steering_angle(self, angle_diff):
+        """Calculate appropriate steering angle based on angle difference"""
+        # Use a proportional control for steering
+        # Scale the angle difference to our maximum steering angle
+        steering_angle = (angle_diff / 45.0) * self.MAX_STEERING_ANGLE
+        # Clamp to our maximum steering angle
+        return max(-self.MAX_STEERING_ANGLE,
+                   min(self.MAX_STEERING_ANGLE, steering_angle))
+
     def get_position(self):
         """Get current position and heading"""
         self._update_position()
@@ -122,6 +216,16 @@ class PicarXWrapper:
             'heading': round(self.heading, 2),
             'speed': round(self.current_speed, 2)
         }
+
+    def get_min_turn_radius(self):
+        """Get the minimum turning radius at the current speed"""
+        return self.MIN_TURN_RADIUS
+
+    def get_target_heading(self, target_x, target_y):
+        """Calculate the heading needed to reach the target point"""
+        dx = target_x - self.x
+        dy = target_y - self.y
+        return math.degrees(math.atan2(dy, dx)) % 360
 
     def reset_position(self):
         """Reset position tracking to origin"""

@@ -167,25 +167,21 @@ class PicarXNavigator:
 
 
 def main():
-    avoider = AsyncObstacleAvoidance()
-    navigator = PicarXNavigator(avoider.px)
-
-    # Navigate to point (100, 100)
-    navigator.set_target(100, 50)
+    # avoider = AsyncObstacleAvoidance()
+    px = PicarXWrapper()
 
     try:
         loop = asyncio.get_event_loop()
         # runner = loop.create_task(avoider.run())
-        runner = loop.create_task(navigator.execute_path())
+        runner = loop.create_task(px.navigate_to_point(100, 50))
         loop.run_until_complete(runner)
     except KeyboardInterrupt:
         print("\nKeyboard interrupt received")
         runner.cancel()
         loop.run_until_complete(runner)
     finally:
-        # Check final state
-        state = navigator.get_state()
-        print(f"Final position: {state['position']}")
+        pos = px.get_position()
+        print(f"Final position: x={pos['x']}, y={pos['y']}, heading={pos['heading']}")
         loop.close()
 
 if __name__ == "__main__":
