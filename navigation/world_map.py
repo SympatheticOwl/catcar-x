@@ -26,13 +26,8 @@ class WorldMap:
 
     def world_to_grid(self, x: float, y: float) -> Tuple[int, int]:
         """Convert world coordinates (cm) to grid coordinates"""
-        grid_x = int(round(x / self.resolution)) + self.origin[0]
-        grid_y = int(round(y / self.resolution)) + self.origin[1]
-
-        # Ensure coordinates are within grid bounds
-        grid_x = max(0, min(grid_x, self.grid_size - 1))
-        grid_y = max(0, min(grid_y, self.grid_size - 1))
-
+        grid_x = int(x / self.resolution) + self.origin[0]
+        grid_y = int(y / self.resolution) + self.origin[1]
         return grid_x, grid_y
 
     def grid_to_world(self, grid_x: int, grid_y: int) -> Tuple[float, float]:
@@ -146,17 +141,6 @@ class WorldMap:
         self.visualize_map()
 
     def visualize_map(self):
-        """Print ASCII visualization of the map with coordinate markers"""
-        print("\nMap Visualization:")
-        print("   ", end="")
-        for x in range(0, min(self.grid_size, 20), 2):
-            print(f"{x:2}", end=" ")
-        print("\n")
-
-        for y in range(min(self.grid_size, 20)):
-            print(f"{y:2} ", end=" ")
-            for x in range(min(self.grid_size, 20)):
-                print('██' if self.grid[y, x] else '··', end=' ')
-            world_x, world_y = self.grid_to_world(x, y)
-            print(f" ({world_x:.1f}, {world_y:.1f})")
-        print()
+        """Print ASCII visualization of the map"""
+        for row in self.grid:
+            print(''.join(['1' if cell else '0' for cell in row]))
