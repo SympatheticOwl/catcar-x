@@ -147,6 +147,8 @@ class PicarXWrapper:
     async def navigate_to_goal(self, goal_x, goal_y, speed=30):
         """Navigate to goal coordinates with obstacle avoidance"""
         while True:
+            curr_pos = self.get_position()
+            print(f'Current position: {curr_pos}')
             distance = self.get_distance_to_goal(goal_x, goal_y)
             if distance < self.position_tolerance:
                 print(f"Reached goal: ({self.x:.1f}, {self.y:.1f})")
