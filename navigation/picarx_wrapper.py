@@ -159,7 +159,7 @@ class PicarXWrapper:
             await self.turn_to_angle(angle_to_goal)
 
             # Check for obstacles before moving
-            distances = await self.px.scan_avg()
+            distances = await self.scan_avg()
             if distances and distances < self.min_obstacle_distance:
                 print(f"Obstacle detected at {distances}cm")
                 self.add_obstacle(distances, self.current_angle)
