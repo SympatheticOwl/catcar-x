@@ -224,7 +224,8 @@ class AsyncObstacleAvoidance:
     async def evasive_maneuver(self):
         """Evasive maneuver with position tracking"""
         try:
-            current_x, current_y, _ = self.px.get_position()
+            position = self.px.get_position()
+            print(f'evasive cur pos: {position}')
 
             # Scan environment
             scan_data = await self.scan_environment()
