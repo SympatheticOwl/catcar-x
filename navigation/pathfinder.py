@@ -2,8 +2,6 @@ import asyncio
 import heapq
 import math
 from typing import List, Tuple, Optional, Dict
-from picarx_wrapper import PicarXWrapper
-from vision_system import VisionSystem
 from world_map import WorldMap
 
 

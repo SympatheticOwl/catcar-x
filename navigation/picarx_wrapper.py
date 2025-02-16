@@ -3,8 +3,7 @@ import math
 import time
 import asyncio
 from picarx import Picarx
-
-from navigation.pathfinder import Pathfinder
+from pathfinder import Pathfinder
 
 
 class PicarXWrapper:
