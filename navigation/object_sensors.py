@@ -278,9 +278,9 @@ class AsyncObstacleAvoidance:
 
     async def navigate_to_goal(self, target_x: float, target_y: float):
         """Main navigation loop with dynamic replanning"""
-        self.is_navigating = True
-        self.target_x = target_x
-        self.target_y = target_y
+        self.pathfinder.is_navigating = True
+        self.pathfinder.target_x = target_x
+        self.pathfinder.target_y = target_y
 
         while self.is_navigating:
             current_time = time.time()
@@ -303,9 +303,9 @@ class AsyncObstacleAvoidance:
                 break
 
             # Replan if needed
-            if (current_time - self.last_plan_time > self.pathfinder.replan_interval or
-                    not self.current_path or
-                    self.current_path_index >= len(self.current_path)):
+            if (current_time - self.pathfinder.last_plan_time > self.pathfinder.replan_interval or
+                    not self.pathfinder.current_path or
+                    self.pathfinder.current_path_index >= len(self.pathfinder.current_path)):
 
                 # Find new path
                 new_path = self.pathfinder.find_path(
@@ -320,14 +320,14 @@ class AsyncObstacleAvoidance:
                     break
 
                 # Smooth and update path
-                self.current_path = self.pathfinder.smooth_path(new_path)
-                self.current_path_index = 0
-                self.last_plan_time = current_time
+                self.pathfinder.current_path = self.pathfinder.smooth_path(new_path)
+                self.pathfinder.current_path_index = 0
+                self.pathfinder.last_plan_time = current_time
 
             # Get next few waypoints to follow
-            current_segment = self.current_path[
-                              self.current_path_index:
-                              self.current_path_index + self.pathfinder.path_segment_length]
+            current_segment = self.pathfinder.current_path[
+                              self.pathfinder.current_path_index:
+                              self.pathfinder.current_path_index + self.pathfinder.path_segment_length]
 
             # Follow path segment
             for waypoint in current_segment:
@@ -342,7 +342,7 @@ class AsyncObstacleAvoidance:
                 # Navigate to waypoint
                 print(f"Moving to waypoint: ({way_x:.1f}, {way_y:.1f})")
                 await self.px.navigate_to_point(way_x, way_y)
-                self.current_path_index += 1
+                self.pathfinder.current_path_index += 1
 
             await asyncio.sleep(0.1)
 
