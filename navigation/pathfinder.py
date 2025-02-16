@@ -1,117 +1,156 @@
+import asyncio
 import heapq
+import math
 from typing import List, Tuple, Optional, Dict
+from picarx_wrapper import PicarXWrapper
+from vision_system import VisionSystem
 from world_map import WorldMap
 
 
-class PathPlanner:
-    def __init__(self, world_map: WorldMap):
+class Pathfinder:
+    def __init__(self, world_map: 'WorldMap'):
         self.world_map = world_map
         self.path: List[Tuple[int, int]] = []
-        self.path_index = 0
-        self.replanning_threshold = 10  # Number of steps before replanning
-        self.steps_since_replan = 0
+        self.replanning_interval = 10  # Number of steps before replanning
+        self.steps_since_replanning = 0
 
-    def heuristic(self, a: Tuple[int, int], b: Tuple[int, int]) -> float:
-        """Manhattan distance heuristic"""
-        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+        # Movement costs
+        self.STRAIGHT_COST = 1.0
+        self.DIAGONAL_COST = 1.4  # sqrt(2)
+        self.OBSTACLE_COST = float('inf')
 
-    def get_neighbors(self, pos: Tuple[int, int]) -> List[Tuple[int, int]]:
-        """Get valid neighboring cells"""
-        x, y = pos
+        # Directions for pathfinding (8-directional movement)
+        self.directions = [
+            (-1, -1), (-1, 0), (-1, 1),
+            (0, -1), (0, 1),
+            (1, -1), (1, 0), (1, 1)
+        ]
+
+    def _get_path_cost(self, current: Tuple[int, int], neighbor: Tuple[int, int]) -> float:
+        """Calculate the cost of moving from current to neighbor"""
+        dx = abs(current[0] - neighbor[0])
+        dy = abs(current[1] - neighbor[1])
+        return self.DIAGONAL_COST if dx + dy == 2 else self.STRAIGHT_COST
+
+    def _heuristic(self, point: Tuple[int, int], goal: Tuple[int, int]) -> float:
+        """Calculate heuristic distance (diagonal distance)"""
+        dx = abs(point[0] - goal[0])
+        dy = abs(point[1] - goal[1])
+        return max(dx, dy) + (math.sqrt(2) - 1) * min(dx, dy)
+
+    def _get_neighbors(self, point: Tuple[int, int]) -> List[Tuple[int, int]]:
+        """Get valid neighboring points"""
         neighbors = []
-
-        # Check 8 surrounding cells
-        for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0),
-                       (1, 1), (1, -1), (-1, 1), (-1, -1)]:
-            new_x, new_y = x + dx, y + dy
+        for dx, dy in self.directions:
+            new_x = point[0] + dx
+            new_y = point[1] + dy
 
             # Check bounds
             if (0 <= new_x < self.world_map.grid_size and
                     0 <= new_y < self.world_map.grid_size):
-                # Check if cell is obstacle-free
+                # Check if point is obstacle-free
                 if self.world_map.grid[new_y, new_x] == 0:
                     neighbors.append((new_x, new_y))
-
         return neighbors
 
-    def a_star(self, start: Tuple[int, int], goal: Tuple[int, int]) -> Optional[List[Tuple[int, int]]]:
-        """A* pathfinding algorithm"""
+    def find_path(self, start: Tuple[float, float], goal: Tuple[float, float]) -> List[Tuple[int, int]]:
+        """Find path from start to goal using A* algorithm"""
+        # Convert world coordinates to grid coordinates
+        start_grid = self.world_map.world_to_grid(*start)
+        goal_grid = self.world_map.world_to_grid(*goal)
+
+        # Initialize data structures
         frontier = []
-        heapq.heappush(frontier, (0, start))
-        came_from: Dict[Tuple[int, int], Optional[Tuple[int, int]]] = {start: None}
-        cost_so_far: Dict[Tuple[int, int], float] = {start: 0}
+        heapq.heappush(frontier, (0, start_grid))
+        came_from = {start_grid: None}
+        cost_so_far = {start_grid: 0}
 
         while frontier:
             current = heapq.heappop(frontier)[1]
 
-            if current == goal:
+            if current == goal_grid:
                 break
 
-            for next_pos in self.get_neighbors(current):
-                # Calculate movement cost (diagonal movement costs more)
-                dx = abs(next_pos[0] - current[0])
-                dy = abs(next_pos[1] - current[1])
-                movement_cost = 1.4 if dx + dy == 2 else 1.0
+            for neighbor in self._get_neighbors(current):
+                new_cost = cost_so_far[current] + self._get_path_cost(current, neighbor)
 
-                new_cost = cost_so_far[current] + movement_cost
-
-                if next_pos not in cost_so_far or new_cost < cost_so_far[next_pos]:
-                    cost_so_far[next_pos] = new_cost
-                    priority = new_cost + self.heuristic(goal, next_pos)
-                    heapq.heappush(frontier, (priority, next_pos))
-                    came_from[next_pos] = current
+                if neighbor not in cost_so_far or new_cost < cost_so_far[neighbor]:
+                    cost_so_far[neighbor] = new_cost
+                    priority = new_cost + self._heuristic(neighbor, goal_grid)
+                    heapq.heappush(frontier, (priority, neighbor))
+                    came_from[neighbor] = current
 
         # Reconstruct path
-        if goal not in came_from:
-            return None
-
-        path = []
-        current = goal
+        self.path = []
+        current = goal_grid
         while current is not None:
-            path.append(current)
-            current = came_from[current]
-        path.reverse()
+            self.path.append(current)
+            current = came_from.get(current)
+        self.path.reverse()
 
-        return path
+        return self.path if self.path else None
 
-    def plan_path(self, start_x: float, start_y: float, goal_x: float, goal_y: float) -> Optional[
-        List[Tuple[float, float]]]:
-        """Plan a path from current position to goal in world coordinates"""
-        # Convert world coordinates to grid coordinates
-        start_grid = self.world_map.world_to_grid(start_x, start_y)
-        goal_grid = self.world_map.world_to_grid(goal_x, goal_y)
+    async def execute_path(self, picar: PicarXWrapper, vision_system: VisionSystem) -> bool:
+        """Execute the planned path while monitoring for obstacles"""
+        if not self.path:
+            return False
 
-        # Find path in grid coordinates
-        grid_path = self.a_star(start_grid, goal_grid)
+        stop_sign_wait_complete = False
 
-        if grid_path is None:
-            return None
+        for i, (grid_x, grid_y) in enumerate(self.path):
+            # Convert grid coordinates back to world coordinates
+            target_x, target_y = self.world_map.grid_to_world(grid_x, grid_y)
 
-        # Convert back to world coordinates
-        world_path = []
-        for grid_x, grid_y in grid_path:
-            world_x, world_y = self.world_map.grid_to_world(grid_x, grid_y)
-            world_path.append((world_x, world_y))
+            # Check for dynamic obstacles
+            while True:
+                # Get vision system updates
+                objects = vision_system.get_obstacle_info()
 
-        self.path = world_path
-        self.path_index = 0
-        return world_path
+                # Handle detected objects
+                if objects:
+                    person_or_cat = any(obj['label'] in ['person', 'cat'] for obj in objects)
+                    stop_sign = any(obj['label'] == 'stop sign' for obj in objects)
 
-    def get_next_waypoint(self) -> Optional[Tuple[float, float]]:
-        """Get next waypoint from current path"""
-        if not self.path or self.path_index >= len(self.path):
-            return None
+                    if person_or_cat:
+                        print("Person or cat detected - waiting...")
+                        picar.stop()
+                        await asyncio.sleep(1)
+                        continue
 
-        waypoint = self.path[self.path_index]
-        self.path_index += 1
-        self.steps_since_replan += 1
+                    if stop_sign and not stop_sign_wait_complete:
+                        print("Stop sign detected - stopping for 3 seconds...")
+                        picar.stop()
+                        await asyncio.sleep(3)
+                        stop_sign_wait_complete = True
 
-        return waypoint
+                # No obstacles detected, proceed with movement
+                break
 
-    def should_replan(self) -> bool:
-        """Check if we should replan the path"""
-        return self.steps_since_replan >= self.replanning_threshold
+            # Move to next point
+            success = await picar.navigate_to_point(target_x, target_y)
+            if not success:
+                return False
 
-    def reset_replan_counter(self):
-        """Reset the replanning counter"""
-        self.steps_since_replan = 0
+            # Check if replanning is needed
+            self.steps_since_replanning += 1
+            if self.steps_since_replanning >= self.replanning_interval:
+                return True  # Signal that replanning is needed
+
+        return True
+
+    def visualize_path(self):
+        """Visualize the planned path on the world map"""
+        if not self.path:
+            return
+
+        # Create a copy of the grid for visualization
+        viz_grid = self.world_map.grid.copy()
+
+        # Mark path points
+        for x, y in self.path:
+            viz_grid[y, x] = 2  # Use 2 to distinguish path from obstacles
+
+        # Print visualization
+        print("\nPath visualization (0=free, 1=obstacle, 2=path):")
+        for row in viz_grid:
+            print(''.join(['2' if cell == 2 else '1' if cell else '0' for cell in row]))

@@ -3,6 +3,8 @@ from typing import List, Dict
 import numpy as np
 import asyncio
 import math
+
+from navigation.pathfinder import Pathfinder
 from world_map import WorldMap
 from picarx_wrapper import PicarXWrapper
 from vision_system import VisionSystem
@@ -10,9 +12,9 @@ from vision_system import VisionSystem
 class AsyncObstacleAvoidance:
     def __init__(self):
         self.px = PicarXWrapper()
-
         # World mapping
-        self.world_map = WorldMap(map_size=400, resolution=1.0)  # 4m x 4m map, 1cm resolution
+        self.world_map = WorldMap(map_size=200, resolution=1.0)  # 4m x 4m map, 1cm resolution
+        self.pathfinder = Pathfinder(self.world_map)
 
         # Sensor offsets from center
         self.ULTRASONIC_OFFSET_X = 5.0  # cm forward
@@ -47,11 +49,6 @@ class AsyncObstacleAvoidance:
         # self.map = np.zeros((map_size, map_size))
         self.scan_range = (-60, 60)
         self.scan_step = 5
-
-    # def visualize_map(self):
-    #     """Print ASCII visualization of the map"""
-    #     for row in self.map:
-    #         print(''.join(['1' if cell else '0' for cell in row]))
 
     def _update_ultrasonic_detection(self, distance: float):
         """Update map with obstacle detected by ultrasonic sensor"""
@@ -277,18 +274,62 @@ class AsyncObstacleAvoidance:
 
             await asyncio.sleep(0.1)
 
+    async def navigate_with_path_planning(self, target_x: float, target_y: float):
+        """Navigate to target point using A* pathfinding with obstacle avoidance"""
+        print(f"Planning path to target: ({target_x}, {target_y})")
+
+        while True:
+            # Get current position
+            current_pos = self.px.get_position()
+            start_point = (current_pos['x'], current_pos['y'])
+
+            # Scan environment and update map
+            await self.scan_environment()
+            self.world_map.add_padding()  # Add safety padding around obstacles
+
+            # Find path to target
+            path = self.pathfinder.find_path(start_point, (target_x, target_y))
+            if not path:
+                print("No valid path found to target!")
+                self.px.stop()
+                return False
+
+            # Visualize the planned path
+            print("\nPlanned path:")
+            self.pathfinder.visualize_path()
+
+            # Execute path
+            success = await self.pathfinder.execute_path(self.px, self.vision)
+
+            # Check if we've reached the target
+            current_pos = self.px.get_position()
+            distance_to_target = math.sqrt(
+                (current_pos['x'] - target_x) ** 2 +
+                (current_pos['y'] - target_y) ** 2
+            )
+
+            if distance_to_target < 5:  # Within 5cm of target
+                print("Reached target!")
+                self.px.stop()
+                return True
+
+            # If replanning needed or path execution failed, continue loop
+            if not success:
+                print("Replanning path...")
+                continue
+
     async def run(self):
         print("Starting enhanced obstacle avoidance program...")
         tasks = []
         try:
             # Add vision task to existing tasks
-            pos_trak_task = asyncio.create_task(self.px.continuous_position_tracking())
+            pos_track_task = asyncio.create_task(self.px.continuous_position_tracking())
             vision_task = asyncio.create_task(self.vision.capture_and_detect())
             ultrasonic_task = asyncio.create_task(self.ultrasonic_monitoring())
             cliff_task = asyncio.create_task(self.cliff_monitoring())
             # movement_task = asyncio.create_task(self.forward_movement())
-            movement_task = asyncio.create_task(self.px.navigate_to_point(50, 50))
-            tasks = [pos_trak_task, vision_task, ultrasonic_task, cliff_task, movement_task]
+            navigation_task = asyncio.create_task(self.navigate_with_path_planning(50, 50))
+            tasks = [pos_track_task, vision_task, ultrasonic_task, cliff_task, navigation_task]
             await asyncio.gather(*tasks)
         except asyncio.CancelledError:
             print("\nShutting down gracefully...")
@@ -301,6 +342,6 @@ class AsyncObstacleAvoidance:
                 pass
 
             self.vision.cleanup()
-            self.px.forward(0)
+            self.px.stop()
             self.px.set_dir_servo_angle(0)
             print("Shutdown complete")
