@@ -426,9 +426,6 @@ class AsyncObstacleAvoidance:
         print("Starting enhanced obstacle avoidance program...")
         tasks = []
         try:
-            await self.scan_environment()
-            self.world_map.add_padding()
-
             # Add vision task to existing tasks
             pos_track_task = asyncio.create_task(self.px.continuous_position_tracking())
             vision_task = asyncio.create_task(self.vision.capture_and_detect())
