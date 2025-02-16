@@ -286,42 +286,27 @@ class AsyncObstacleAvoidance:
                 current_pos = self.px.get_position()
                 current_x = current_pos['x']
                 current_y = current_pos['y']
-                print(f'current_x: {current_x}, current_y: {current_y}')
+
+                print(f"\nCurrent position: ({current_x}, {current_y})")
+                print(f"Target position: ({target_x}, {target_y})")
 
                 # Check if we've reached the target
                 distance_to_target = math.sqrt((target_x - current_x) ** 2 + (target_y - current_y) ** 2)
-                print(f'distance_to_target: {distance_to_target}')
                 if distance_to_target < 5:  # 5cm threshold
                     print(f"Reached target: ({target_x}, {target_y})")
                     self.px.stop()
                     self.is_navigating = False
                     return True
 
-                # Check for obstacles detected by vision system
-                if self.vision_enabled:
-                    objects = self.vision.get_obstacle_info()
-                    if objects:
-                        self._update_vision_detections(objects)
-
-                        # Check for special objects
-                        for obj in objects:
-                            if obj['label'] in ['person', 'cat']:
-                                print(f"Waiting for {obj['label']} to move...")
-                                self.px.stop()
-                                await asyncio.sleep(1)  # Check again in 1 second
-                                continue
-
-                            elif obj['label'] == 'stop sign':
-                                print("Stop sign detected! Waiting 3 seconds...")
-                                self.px.stop()
-                                await asyncio.sleep(3)
+                # Visualize current state
+                print("\nCurrent World Map:")
+                self.world_map.visualize_map()
 
                 # Find path to target
                 path = self.pathfinder.find_path(
                     (current_x, current_y),
                     (target_x, target_y)
                 )
-                print(f'path: {path}')
 
                 if not path:
                     print("No valid path found. Waiting and retrying...")
@@ -329,21 +314,50 @@ class AsyncObstacleAvoidance:
                     await asyncio.sleep(1)
                     continue
 
+                print(f"Found path with {len(path)} waypoints: {path}")
+
                 # Smooth the path
                 smoothed_path = self.pathfinder.smooth_path(path)
+                print(f"Smoothed path: {smoothed_path}")
 
                 # Follow the path
                 for waypoint_x, waypoint_y in smoothed_path[1:]:  # Skip first point (current position)
-                    # Navigate to waypoint
-                    await self.px.navigate_to_point(waypoint_x, waypoint_y)
+                    print(f"\nNavigating to waypoint: ({waypoint_x}, {waypoint_y})")
 
-                    # Check if navigation was interrupted
-                    if self.emergency_stop_flag or not self.is_navigating:
+                    # Check for obstacles detected by vision system
+                    if self.vision_enabled:
+                        objects = self.vision.get_obstacle_info()
+                        if objects:
+                            self._update_vision_detections(objects)
+
+                            # Check for special objects
+                            for obj in objects:
+                                if obj['label'] in ['person', 'cat']:
+                                    print(f"Waiting for {obj['label']} to move...")
+                                    self.px.stop()
+                                    await asyncio.sleep(1)  # Check again in 1 second
+                                    continue
+
+                                elif obj['label'] == 'stop sign':
+                                    print("Stop sign detected! Waiting 3 seconds...")
+                                    self.px.stop()
+                                    await asyncio.sleep(3)
+
+                    # Navigate to waypoint
+                    success = await self.px.navigate_to_point(waypoint_x, waypoint_y)
+
+                    if not success or self.emergency_stop_flag or not self.is_navigating:
+                        print("Navigation interrupted!")
                         return False
 
+                    # Small delay between waypoints
+                    await asyncio.sleep(0.1)
+
+                # Brief delay before next planning cycle
                 await asyncio.sleep(0.1)
 
         except asyncio.CancelledError:
+            print("Navigation cancelled!")
             self.px.stop()
             self.is_navigating = False
             raise

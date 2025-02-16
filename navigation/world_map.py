@@ -5,35 +5,37 @@ from scipy import ndimage
 
 class WorldMap:
     def __init__(self, map_size: int = 400, resolution: float = 1.0):
-        """
-        Initialize world map for obstacle tracking
-
-        Args:
-            map_size: Size of the map in cm
-            resolution: cm per grid cell (1.0 = 1cm per cell)
-        """
         self.resolution = resolution
         self.grid_size = int(map_size / resolution)
         self.grid = np.zeros((self.grid_size, self.grid_size), dtype=np.uint8)
-        self.origin = np.array([0, 0])
+
+        # Set origin to center of grid
+        self.origin = np.array([self.grid_size // 2, self.grid_size // 2])
 
         # Obstacle tracking
-        self.obstacles = {}  # Track individual obstacles
+        self.obstacles = {}
         self.obstacle_id_counter = 0
 
-        self.padding_size = 2  # Number of cells to pad around obstacles
-        self.padding_structure = np.ones((2, 2))  # 2x2 structuring element for dilation
+        self.padding_size = 2
+        self.padding_structure = np.ones((2, 2))
 
     def world_to_grid(self, x: float, y: float) -> Tuple[int, int]:
         """Convert world coordinates (cm) to grid coordinates"""
         grid_x = int(x / self.resolution) + self.origin[0]
         grid_y = int(y / self.resolution) + self.origin[1]
+
+        # Ensure coordinates are within bounds
+        grid_x = max(0, min(grid_x, self.grid_size - 1))
+        grid_y = max(0, min(grid_y, self.grid_size - 1))
+
+        print(f"Converting world ({x}, {y}) to grid ({grid_x}, {grid_y})")
         return grid_x, grid_y
 
     def grid_to_world(self, grid_x: int, grid_y: int) -> Tuple[float, float]:
         """Convert grid coordinates to world coordinates (cm)"""
         x = (grid_x - self.origin[0]) * self.resolution
         y = (grid_y - self.origin[1]) * self.resolution
+        print(f"Converting grid ({grid_x}, {grid_y}) to world ({x}, {y})")
         return x, y
 
     def add_obstacle(self, x: float, y: float, radius: float = 10.0, confidence: float = 1.0,

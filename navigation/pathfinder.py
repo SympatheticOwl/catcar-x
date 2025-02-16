@@ -16,8 +16,8 @@ class Pathfinder:
         self.min_turn_radius = picar.get_min_turn_radius()
 
     def heuristic(self, a: Tuple[int, int], b: Tuple[int, int]) -> float:
-        """Manhattan distance heuristic"""
-        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+        """Euclidean distance heuristic"""
+        return math.sqrt((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2)
 
     def get_neighbors(self, node: Tuple[int, int]) -> List[Tuple[int, int]]:
         """Get valid neighboring cells"""
@@ -32,39 +32,22 @@ class Pathfinder:
             if (0 <= new_x < self.world_map.grid_size and
                     0 <= new_y < self.world_map.grid_size):
 
+                # Debug print
+                print(f"Checking neighbor ({new_x}, {new_y})")
+                print(f"Grid value: {self.world_map.grid[new_y, new_x]}")
+
                 # Check if cell is obstacle-free
                 if self.world_map.grid[new_y, new_x] == 0:
                     # Check turning radius constraint
                     if self.check_turn_feasible(node, (new_x, new_y)):
                         neighbors.append((new_x, new_y))
+                        print(f"Added valid neighbor: ({new_x}, {new_y})")
 
         return neighbors
 
     def check_turn_feasible(self, current: Tuple[int, int], next: Tuple[int, int]) -> bool:
         """Check if turn is feasible given car's minimum turning radius"""
-        # Convert grid coordinates to world coordinates
-        curr_world = self.world_map.grid_to_world(current[0], current[1])
-        next_world = self.world_map.grid_to_world(next[0], next[1])
-
-        # Get current heading
-        current_heading = self.picar.heading
-
-        # Calculate required heading change
-        dx = next_world[0] - curr_world[0]
-        dy = next_world[1] - curr_world[1]
-        target_heading = math.degrees(math.atan2(dy, dx))
-
-        # Calculate angle difference
-        angle_diff = abs((target_heading - current_heading + 180) % 360 - 180)
-
-        # Calculate distance between points
-        distance = math.sqrt(dx ** 2 + dy ** 2)
-
-        # Check if turn is possible given minimum turning radius
-        if angle_diff > 0:
-            required_radius = distance / (2 * math.sin(math.radians(angle_diff / 2)))
-            return required_radius >= self.min_turn_radius
-
+        # For initial testing, always return True to debug path finding
         return True
 
     def find_path(self, start: Tuple[float, float], goal: Tuple[float, float]) -> List[Tuple[float, float]]:
@@ -73,16 +56,31 @@ class Pathfinder:
         start_grid = self.world_map.world_to_grid(start[0], start[1])
         goal_grid = self.world_map.world_to_grid(goal[0], goal[1])
 
+        print(f"Finding path from {start} to {goal}")
+        print(f"Grid coordinates: from {start_grid} to {goal_grid}")
+
+        # Validate coordinates
+        if not (0 <= start_grid[0] < self.world_map.grid_size and
+                0 <= start_grid[1] < self.world_map.grid_size and
+                0 <= goal_grid[0] < self.world_map.grid_size and
+                0 <= goal_grid[1] < self.world_map.grid_size):
+            print("Start or goal coordinates out of bounds!")
+            return []
+
         # Initialize data structures
         frontier = []
         heapq.heappush(frontier, (0, start_grid))
         came_from = {start_grid: None}
         cost_so_far = {start_grid: 0}
 
+        print("Starting pathfinding loop...")
+
         while frontier:
             current = heapq.heappop(frontier)[1]
+            print(f"Exploring node: {current}")
 
             if current == goal_grid:
+                print("Goal reached!")
                 break
 
             for next in self.get_neighbors(current):
@@ -98,9 +96,11 @@ class Pathfinder:
                     priority = new_cost + self.heuristic(next, goal_grid)
                     heapq.heappush(frontier, (priority, next))
                     came_from[next] = current
+                    print(f"Added node {next} to frontier with priority {priority}")
 
         # Reconstruct path
         if goal_grid not in came_from:
+            print("No path found!")
             return []  # No path found
 
         path = []
@@ -112,6 +112,7 @@ class Pathfinder:
             current = came_from[current]
 
         path.reverse()
+        print(f"Found path: {path}")
         return path
 
     def smooth_path(self, path: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
