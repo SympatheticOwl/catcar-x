@@ -30,7 +30,7 @@ class PicarXWrapper:
         self.MAX_RPM = 150  # Approximate max RPM at full speed
         self.TURNING_SPEED = 30  # Standard speed for turning
         self.MIN_TURN_RADIUS = self.WHEELBASE / math.tan(math.radians(self.MAX_STEERING_ANGLE))
-        self.NINETY_DEG_TURN_TIME = 2.33  # Time to complete a 90-degree turn
+        self.NINETY_DEG_TURN_TIME = 2.5  # Time to complete a 90-degree turn
         self.TURN_RATE = 90 / self.NINETY_DEG_TURN_TIME  # degrees per second at max steering
 
         asyncio.create_task(self._continuous_position_tracking())
