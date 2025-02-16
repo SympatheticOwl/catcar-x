@@ -213,7 +213,7 @@ class AsyncObstacleAvoidance:
 
     async def forward_movement(self, x: float, y: float):
         position = self.px.get_position()
-        while position[x] < x and position[y] < y:
+        while position['x'] < x and position['y'] < y:
             if not self.emergency_stop_flag and not self.current_maneuver:
                 # Check both ultrasonic and vision systems
                 if self.vision_enabled:
