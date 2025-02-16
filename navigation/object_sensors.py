@@ -317,7 +317,7 @@ class AsyncObstacleAvoidance:
                 print(f"Found path with {len(path)} waypoints: {path}")
 
                 # Smooth the path
-                smoothed_path = self.pathfinder.smooth_path(path)
+                smoothed_path = self.pathfinder.optimize_path(path)
                 print(f"Smoothed path: {smoothed_path}")
 
                 # Follow the path
