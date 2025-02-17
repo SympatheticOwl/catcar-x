@@ -243,12 +243,9 @@ class AsyncObstacleAvoidance:
         self.navigation_target = (target_x, target_y)
         self.is_navigating = True
 
-        # Add minimum distance threshold for heading changes
-        MIN_HEADING_CHANGE_DIST = 20  # cm
-        FINAL_APPROACH_DIST = self.world_map.resolution  # One grid cell
-
         try:
             while self.is_navigating:
+                # Get current position
                 current_pos = self.px.get_position()
                 current_x, current_y = current_pos['x'], current_pos['y']
 
@@ -256,36 +253,21 @@ class AsyncObstacleAvoidance:
                 distance_to_target = math.sqrt(
                     (target_x - current_x) ** 2 + (target_y - current_y) ** 2
                 )
-
+                # Use a larger threshold since we're working with 40cm grid cells
                 if distance_to_target < self.world_map.resolution / 2:  # Within half a grid cell
                     print("Reached target!")
                     self.px.stop()
                     self.is_navigating = False
                     return True
 
-                # When very close to target, use direct approach instead of waypoints
-                if distance_to_target < FINAL_APPROACH_DIST:
-                    print("Final approach to target")
-                    target_heading = self.px.get_target_heading(target_x, target_y)
-
-                    # Only adjust heading if we're significantly off
-                    current_heading = self.px.heading
-                    heading_diff = abs((target_heading - current_heading + 180) % 360 - 180)
-
-                    if heading_diff > 10:  # Only turn if more than 10 degrees off
-                        await self.px.turn_to_heading(target_heading)
-
-                    self.px.forward(self.speed)
-                    await asyncio.sleep(0.1)
-                    continue
-
-                # Regular pathfinding for longer distances
+                # Convert current and target positions to grid coordinates
                 current_grid = self.world_map.world_to_grid(current_x, current_y)
                 target_grid = self.world_map.world_to_grid(target_x, target_y)
 
                 print(f"Current grid position: {current_grid}")
                 print(f"Target grid position: {target_grid}")
 
+                # Find path to target
                 path = self.pathfinder.find_path(current_grid, target_grid)
                 if not path:
                     print("No path found to target!")
@@ -293,13 +275,16 @@ class AsyncObstacleAvoidance:
                     self.is_navigating = False
                     return False
 
+                # Post-process path
                 path = self.pathfinder.post_process_path(path)
                 self.current_path = path
                 self.current_path_index = 0
 
                 print(f"Generated path: {path}")
 
+                # Follow path until interrupted or completed
                 while self.current_path_index < len(self.current_path):
+                    # Check vision system for obstacles
                     vision_obstacles = self.vision.get_obstacle_info()
                     if vision_obstacles:
                         for obstacle in vision_obstacles:
@@ -313,43 +298,43 @@ class AsyncObstacleAvoidance:
                                 self.px.stop()
                                 await asyncio.sleep(3)
 
+                    # Get next waypoint
                     next_x, next_y = self.current_path[self.current_path_index]
 
-                    # Calculate distance to next waypoint
-                    dist_to_waypoint = math.sqrt(
-                        (next_x - current_x) ** 2 + (next_y - current_y) ** 2
-                    )
+                    # Calculate heading to waypoint
+                    target_heading = self.px.get_target_heading(next_x, next_y)
 
-                    # Only change heading if we're far enough from the waypoint
-                    if dist_to_waypoint > MIN_HEADING_CHANGE_DIST:
-                        target_heading = self.px.get_target_heading(next_x, next_y)
-                        current_heading = self.px.heading
-                        heading_diff = abs((target_heading - current_heading + 180) % 360 - 180)
+                    # Turn to target heading
+                    await self.px.turn_to_heading(target_heading)
 
-                        if heading_diff > 10:  # Only turn if more than 10 degrees off
-                            await self.px.turn_to_heading(target_heading)
-
+                    # Move forward
                     self.is_moving = True
                     self.px.forward(self.speed)
 
+                    # Wait for waypoint or interruption
                     while True:
+                        # Check if we've reached the waypoint
                         current_pos = self.px.get_position()
                         distance = math.sqrt(
                             (next_x - current_pos['x']) ** 2 +
                             (next_y - current_pos['y']) ** 2
                         )
 
+                        # Use half grid cell size as waypoint threshold
                         if distance < self.world_map.resolution / 2:
                             print(f"Reached waypoint {self.current_path_index}")
                             self.current_path_index += 1
                             break
 
+                        # Check ultrasonic distance and update world map
                         if self.current_distance < self.min_distance and not self.is_backing_up:
                             print(f"Obstacle detected by ultrasonic at {self.current_distance}cm")
+                            # Let the scan environment update the world map
                             await self.scan_environment()
                             await self.emergency_stop()
                             break
 
+                        # Check for visual obstacles again while moving
                         vision_obstacles = self.vision.get_obstacle_info()
                         if vision_obstacles:
                             need_stop = False
