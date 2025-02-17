@@ -211,7 +211,8 @@ class AsyncObstacleAvoidance:
             self.is_backing_up = False
 
             print(f"Turning to {best_angle}° (clearest path: {max_distance:.1f}cm)")
-            self.px.set_dir_servo_angle(best_angle)
+            # self.px.set_dir_servo_angle(best_angle)
+            self.px.set_dir_servo_angle(30)
             self.px.forward(self.speed)
             await asyncio.sleep(self.turn_time)
 
