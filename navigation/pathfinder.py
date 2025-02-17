@@ -173,7 +173,7 @@ class Pathfinder:
     def update_path(self, current_x: float, current_y: float,
                     goal_x: float, goal_y: float) -> List[Tuple[float, float]]:
         """Update path based on current position and world state"""
-        new_path = await self.find_path(current_x, current_y, goal_x, goal_y)
+        new_path = self.find_path(current_x, current_y, goal_x, goal_y)
         if new_path:
             new_path = self.smooth_path(new_path)
         return new_path
