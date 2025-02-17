@@ -298,7 +298,11 @@ class AsyncObstacleAvoidance:
                 self.is_moving = False
                 self.px.forward(0)
                 await asyncio.sleep(0.5)
-                await self.evasive_maneuver()
+                self.is_moving = False
+                self.px.forward(0)
+                self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
+                await self.current_maneuver
+                await asyncio.sleep(0.5)
                 print("current_maneuver done...")
                 # Recalculate path
                 print("Recalculating path...")
