@@ -239,9 +239,9 @@ class AsyncObstacleAvoidance:
 
     async def navigate_to_target(self, target_x: float, target_y: float):
         """Navigate to target coordinates while avoiding obstacles"""
-        print(f"Starting navigation to target ({target_x}, {target_y})")
-        self.navigation_target = (target_x, target_y)
         self.is_navigating = True
+        self.navigation_target = (target_x, target_y)
+        print(f"Starting navigation to target ({target_x}, {target_y})")
 
         try:
             while self.is_navigating:
@@ -250,108 +250,76 @@ class AsyncObstacleAvoidance:
                 current_x, current_y = current_pos['x'], current_pos['y']
 
                 # Check if we've reached the target
-                distance_to_target = math.sqrt((target_x - current_x) ** 2 + (target_y - current_y) ** 2)
+                distance_to_target = math.sqrt(
+                    (target_x - current_x) ** 2 + (target_y - current_y) ** 2
+                )
                 if distance_to_target < 10:  # Within 10cm
                     print("Reached target!")
-                    self.px.stop()
                     self.is_navigating = False
-                    return True
-
-                # Calculate path to target
-                path = self.pathfinder.find_path(
-                    (current_x, current_y),
-                    (target_x, target_y)
-                )
-
-                if not path:
-                    print("No path found to target!")
                     self.px.stop()
-                    self.is_navigating = False
-                    return False
+                    break
 
-                print(f"Found path with {len(path)} waypoints")
-                self.current_path = path
-                self.current_path_index = 0
+                # Plan new path if needed
+                if (not self.current_path or
+                        self.current_path_index >= len(self.current_path) or
+                        self.emergency_stop_flag):
 
-                # Follow path
-                while self.current_path_index < len(self.current_path):
-                    # Check for obstacles from vision system
-                    if self.vision.detected_objects:
-                        for obj in self.vision.detected_objects:
-                            if obj['label'] in ['person', 'cat']:
-                                print(f"Detected {obj['label']}, waiting...")
-                                self.px.stop()
-                                while any(o['label'] in ['person', 'cat']
-                                          for o in self.vision.detected_objects):
-                                    await asyncio.sleep(0.5)
-                                print(f"{obj['label']} cleared, resuming navigation")
-                                break
+                    # Scan environment before planning
+                    await self.scan_environment()
 
-                            elif obj['label'] == 'stop_sign':
-                                print("Stop sign detected, waiting 3 seconds")
-                                self.px.stop()
-                                await asyncio.sleep(3.0)
-                                print("Resuming after stop sign")
-                                break
-
-                    # Get next waypoint
-                    next_x, next_y = self.current_path[self.current_path_index]
-
-                    # Calculate heading to waypoint
-                    target_heading = self.px.get_target_heading(next_x, next_y)
-                    current_heading = self.px.heading
-
-                    # Calculate angle difference
-                    angle_diff = ((target_heading - current_heading + 180) % 360) - 180
-
-                    # If angle difference is large, turn in place
-                    if abs(angle_diff) > 45:
-                        print(f"Turning to heading {target_heading}")
-                        await self.px.turn_to_heading(target_heading)
-                        continue
-
-                    # Calculate steering angle
-                    steering_angle = self.px.calculate_steering_angle(angle_diff)
-                    self.px.set_dir_servo_angle(steering_angle)
-
-                    # Move forward
-                    if not self.is_moving:
-                        self.is_moving = True
-                        self.px.forward(self.speed)
-
-                    # Check if we've reached the waypoint
-                    current_pos = self.px.get_position()
-                    dist_to_waypoint = math.sqrt(
-                        (next_x - current_pos['x']) ** 2 +
-                        (next_y - current_pos['y']) ** 2
+                    # Find path to target
+                    self.current_path = self.pathfinder.find_path(
+                        current_x, current_y, target_x, target_y
                     )
+                    self.current_path_index = 0
 
-                    if dist_to_waypoint < 10:  # Within 10cm
-                        print(f"Reached waypoint {self.current_path_index}")
-                        self.current_path_index += 1
-
-                    # Check for emergency stop
-                    if self.emergency_stop_flag:
-                        print("Emergency stop triggered, recalculating path")
+                    if not self.current_path:
+                        print("No path found to target!")
+                        self.is_navigating = False
+                        self.px.stop()
                         break
 
-                    await asyncio.sleep(0.1)
+                    print(f"New path planned: {self.current_path}")
 
-                # If we were emergency stopped, wait for evasive maneuver
-                if self.emergency_stop_flag:
-                    while self.current_maneuver:
-                        await asyncio.sleep(0.1)
-                    continue
+                # Get next waypoint
+                next_x, next_y = self.current_path[self.current_path_index]
+
+                # Calculate heading to waypoint
+                target_heading = self.pathfinder.get_heading_to_point(
+                    current_x, current_y, next_x, next_y
+                )
+
+                # Turn to face waypoint
+                heading_diff = (target_heading - current_pos['heading'] + 180) % 360 - 180
+
+                if abs(heading_diff) > 10:  # If heading off by more than 10 degrees
+                    await self.px.turn_to_heading(target_heading)
+
+                # Move forward if not already moving
+                if not self.is_moving and not self.emergency_stop_flag:
+                    self.is_moving = True
+                    self.px.forward(self.speed)
+
+                # Check if we've reached current waypoint
+                distance_to_waypoint = math.sqrt(
+                    (next_x - current_x) ** 2 + (next_y - current_y) ** 2
+                )
+                if distance_to_waypoint < 10:  # Within 10cm
+                    self.current_path_index += 1
+                    print(f"Reached waypoint {self.current_path_index}")
+
+                await asyncio.sleep(0.1)
 
         except asyncio.CancelledError:
             print("Navigation cancelled")
-            self.px.stop()
             self.is_navigating = False
+            self.px.stop()
             raise
 
         finally:
-            self.px.stop()
-            self.is_navigating = False
+            self.navigation_target = None
+            self.current_path = []
+            self.current_path_index = 0
 
     async def run(self):
         print("Starting enhanced obstacle avoidance program...")
