@@ -281,7 +281,7 @@ class AsyncObstacleAvoidance:
             # Get current path or calculate new one
             if not self.pathfinder.current_path:
                 print("Calculating initial path...")
-                path = await self.pathfinder.find_path(
+                path = self.pathfinder.find_path(
                     current_x, current_y,
                     target_x, target_y
                 )
@@ -299,7 +299,7 @@ class AsyncObstacleAvoidance:
 
                 # Recalculate path
                 print("Recalculating path...")
-                path = await self.pathfinder.update_path(
+                path = self.pathfinder.update_path(
                     current_x, current_y,
                     target_x, target_y
                 )
