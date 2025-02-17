@@ -12,177 +12,176 @@ from world_map import WorldMap
 
 
 class Pathfinder:
-    def __init__(self, world_map: WorldMap, picarx: PicarXWrapper):
+    def __init__(self, world_map, picarx):
         self.world_map = world_map
         self.picarx = picarx
 
-        # Calculate grid cell size based on map parameters
-        self.cell_size = self.world_map.resolution  # Size of each grid cell in cm
+        # Movement costs
+        self.STRAIGHT_COST = 1.0
+        self.DIAGONAL_COST = 1.4  # sqrt(2)
 
-        # Define movements relative to grid size
-        # Note: Diagonal cost is calculated dynamically based on cell_size
-        self.movements = [
-            (0, 1),  # up
-            (1, 0),  # right
-            (0, -1),  # down
-            (-1, 0),  # left
-            (1, 1),  # diagonal up-right
-            (-1, 1),  # diagonal up-left
-            (1, -1),  # diagonal down-right
-            (-1, -1),  # diagonal down-left
+        # Possible movement directions (8-directional movement)
+        self.DIRECTIONS = [
+            (-1, -1), (-1, 0), (-1, 1),  # Northwest, North, Northeast
+            (0, -1), (0, 1),  # West, East
+            (1, -1), (1, 0), (1, 1)  # Southwest, South, Southeast
         ]
 
-    def heuristic(self, a: Tuple[int, int], b: Tuple[int, int]) -> float:
-        """
-        Calculate heuristic (Euclidean distance) between points in grid coordinates
-        Scales by cell_size to get real-world distance
-        """
-        grid_dist = np.sqrt((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2)
-        return grid_dist * self.cell_size
+    def _heuristic(self, a: Tuple[int, int], b: Tuple[int, int]) -> float:
+        """Calculate heuristic (diagonal distance) between two points"""
+        dx = abs(a[0] - b[0])
+        dy = abs(a[1] - b[1])
+        return max(dx, dy) + (math.sqrt(2) - 1) * min(dx, dy)
 
-    def get_neighbors(self, pos: Tuple[int, int]) -> List[Tuple[int, int]]:
-        """Get valid neighboring grid positions considering grid boundaries"""
+    def _get_neighbors(self, current: Tuple[int, int]) -> List[Tuple[int, int]]:
+        """Get valid neighboring grid cells"""
         neighbors = []
 
-        for dx, dy in self.movements:
-            new_pos = (pos[0] + dx, pos[1] + dy)
+        for dx, dy in self.DIRECTIONS:
+            new_x = current[0] + dx
+            new_y = current[1] + dy
 
-            # Check if within grid bounds
-            if (0 <= new_pos[0] < self.world_map.grid_size and
-                    0 <= new_pos[1] < self.world_map.grid_size):
+            # Check bounds
+            if (0 <= new_x < self.world_map.grid_size and
+                    0 <= new_y < self.world_map.grid_size):
 
-                # For diagonal movements, check both cardinal directions for obstacles
-                # to prevent cutting corners
-                is_diagonal = dx != 0 and dy != 0
-                if is_diagonal:
-                    cardinal1 = (pos[0] + dx, pos[1])
-                    cardinal2 = (pos[0], pos[1] + dy)
-                    if (self.world_map.grid[cardinal1[1], cardinal1[0]] != 0 or
-                            self.world_map.grid[cardinal2[1], cardinal2[0]] != 0):
-                        continue
-
-                # Check if not an obstacle
-                if self.world_map.grid[new_pos[1], new_pos[0]] == 0:
-                    neighbors.append(new_pos)
+                # Check if cell is obstacle-free
+                if self.world_map.grid[new_y, new_x] == 0:
+                    neighbors.append((new_x, new_y))
 
         return neighbors
 
-    def calculate_movement_cost(self, current: Tuple[int, int], next_pos: Tuple[int, int]) -> float:
-        """Calculate real-world movement cost between adjacent grid cells"""
-        dx, dy = next_pos[0] - current[0], next_pos[1] - current[1]
-        grid_dist = np.sqrt(dx * dx + dy * dy)  # 1.0 for cardinal, √2 for diagonal
-        return grid_dist * self.cell_size  # Convert to real-world distance
+    def _movement_cost(self, a: Tuple[int, int], b: Tuple[int, int]) -> float:
+        """Calculate cost of movement between adjacent cells"""
+        dx = abs(a[0] - b[0])
+        dy = abs(a[1] - b[1])
 
-    def find_path(self, start_pos: Tuple[float, float],
-                  target_pos: Tuple[float, float]) -> Optional[List[Tuple[float, float]]]:
+        # Diagonal movement
+        if dx == 1 and dy == 1:
+            return self.DIAGONAL_COST
+        # Straight movement
+        return self.STRAIGHT_COST
+
+    def find_path(self, start_x: float, start_y: float,
+                  target_x: float, target_y: float) -> List[Tuple[float, float]]:
         """
-        Find path from start to target position using A*
+        Find a path from start to target position using A* algorithm
 
         Args:
-            start_pos: Starting position in world coordinates (x, y)
-            target_pos: Target position in world coordinates (x, y)
+            start_x, start_y: Starting position in world coordinates (cm)
+            target_x, target_y: Target position in world coordinates (cm)
 
         Returns:
-            List of waypoints in world coordinates, or None if no path found
+            List of (x, y) waypoints in world coordinates (cm)
         """
         # Convert world coordinates to grid coordinates
-        start_grid = self.world_map.world_to_grid(start_pos[0], start_pos[1])
-        target_grid = self.world_map.world_to_grid(target_pos[0], target_pos[1])
+        start_grid = self.world_map.world_to_grid(start_x, start_y)
+        target_grid = self.world_map.world_to_grid(target_x, target_y)
 
-        # Check if start or target is in obstacle
-        if (self.world_map.grid[start_grid[1], start_grid[0]] != 0 or
-                self.world_map.grid[target_grid[1], target_grid[0]] != 0):
-            return None
+        # Check if target is reachable
+        if self.world_map.grid[target_grid[1], target_grid[0]] != 0:
+            print("Target position is blocked by obstacle")
+            return []
 
         # Initialize data structures
-        frontier = []
+        frontier = []  # Priority queue of nodes to explore
         heapq.heappush(frontier, (0, start_grid))
-        came_from = {start_grid: None}
-        cost_so_far = {start_grid: 0}
 
+        came_from = {start_grid: None}  # Path tracking
+        cost_so_far = {start_grid: 0}  # Cost to reach each node
+
+        # A* search
         while frontier:
             current = heapq.heappop(frontier)[1]
 
+            # Path found
             if current == target_grid:
                 break
 
-            for next_pos in self.get_neighbors(current):
-                # Calculate real-world movement cost
-                new_cost = cost_so_far[current] + self.calculate_movement_cost(current, next_pos)
+            # Explore neighbors
+            for next_pos in self._get_neighbors(current):
+                new_cost = cost_so_far[current] + self._movement_cost(current, next_pos)
 
                 if next_pos not in cost_so_far or new_cost < cost_so_far[next_pos]:
                     cost_so_far[next_pos] = new_cost
-                    priority = new_cost + self.heuristic(next_pos, target_grid)
+                    priority = new_cost + self._heuristic(next_pos, target_grid)
                     heapq.heappush(frontier, (priority, next_pos))
                     came_from[next_pos] = current
 
-        # If target not reached, no path exists
+        # No path found
         if target_grid not in came_from:
-            return None
+            print("No path found to target")
+            return []
 
         # Reconstruct path
         path = []
         current = target_grid
         while current is not None:
-            # Convert back to world coordinates
-            world_pos = self.world_map.grid_to_world(current[0], current[1])
-            path.append(world_pos)
+            path.append(current)
             current = came_from[current]
-
         path.reverse()
 
-        # Path smoothing: remove unnecessary waypoints
-        return self.smooth_path(path)
+        # Convert back to world coordinates
+        world_path = [self.world_map.grid_to_world(x, y) for x, y in path]
+        return world_path
 
-    def smooth_path(self, path: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
-        """Smooth path by removing unnecessary waypoints"""
+    def smooth_path(self, path: List[Tuple[float, float]],
+                    smoothing_strength: float = 0.5) -> List[Tuple[float, float]]:
+        """
+        Apply path smoothing to reduce sharp turns
+
+        Args:
+            path: List of (x, y) waypoints
+            smoothing_strength: How much to smooth (0-1)
+
+        Returns:
+            Smoothed path
+        """
         if len(path) <= 2:
             return path
 
-        smoothed = [path[0]]
-        current_idx = 0
+        smoothed = list(path)
+        change = True
+        while change:
+            change = False
+            for i in range(1, len(smoothed) - 1):
+                old_x, old_y = smoothed[i]
 
-        while current_idx < len(path) - 1:
-            # Look ahead as far as possible while maintaining clear line of sight
-            for look_ahead in range(len(path) - 1, current_idx, -1):
-                # Check if direct path is clear
-                if self.is_line_of_sight_clear(path[current_idx], path[look_ahead]):
-                    smoothed.append(path[look_ahead])
-                    current_idx = look_ahead
-                    break
-            current_idx += 1
+                # Calculate smoothed position
+                smoothed[i] = (
+                    old_x + smoothing_strength * (smoothed[i - 1][0] + smoothed[i + 1][0] - 2 * old_x),
+                    old_y + smoothing_strength * (smoothed[i - 1][1] + smoothed[i + 1][1] - 2 * old_y)
+                )
+
+                # Check if significant change occurred
+                if abs(smoothed[i][0] - old_x) > 0.1 or abs(smoothed[i][1] - old_y) > 0.1:
+                    change = True
 
         return smoothed
 
-    def is_line_of_sight_clear(self, start: Tuple[float, float],
-                               end: Tuple[float, float]) -> bool:
-        """Check if there's a clear line of sight between two points"""
-        # Convert to grid coordinates
-        start_grid = self.world_map.world_to_grid(start[0], start[1])
-        end_grid = self.world_map.world_to_grid(end[0], end[1])
+    def is_path_clear(self, path: List[Tuple[float, float]], clearance: float = 20.0) -> bool:
+        """
+        Check if path is clear of obstacles
 
-        # Use Bresenham's line algorithm to check grid cells along the line
-        x0, y0 = start_grid
-        x1, y1 = end_grid
-        dx = abs(x1 - x0)
-        dy = abs(y1 - y0)
-        x, y = x0, y0
-        n = 1 + dx + dy
-        x_inc = 1 if x1 > x0 else -1
-        y_inc = 1 if y1 > y0 else -1
-        error = dx - dy
-        dx *= 2
-        dy *= 2
+        Args:
+            path: List of (x, y) waypoints
+            clearance: Minimum clearance from obstacles (cm)
 
-        for _ in range(n):
-            if self.world_map.grid[y, x] != 0:
-                return False
+        Returns:
+            True if path is clear
+        """
+        for i in range(len(path) - 1):
+            start = path[i]
+            end = path[i + 1]
 
-            if error > 0:
-                x += x_inc
-                error -= dy
-            else:
-                y += y_inc
-                error += dx
+            # Check points along the line segment
+            steps = int(math.dist(start, end) / clearance)
+            for t in range(steps + 1):
+                x = start[0] + (end[0] - start[0]) * t / steps
+                y = start[1] + (end[1] - start[1]) * t / steps
+
+                grid_x, grid_y = self.world_map.world_to_grid(x, y)
+                if self.world_map.grid[grid_y, grid_x] != 0:
+                    return False
 
         return True

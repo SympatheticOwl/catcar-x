@@ -239,129 +239,90 @@ class AsyncObstacleAvoidance:
 
     async def navigate_to_target(self, target_x: float, target_y: float):
         """Navigate to target position while avoiding obstacles"""
-        print(f"Starting navigation to target ({target_x}, {target_y})")
         self.is_navigating = True
+        self.navigation_target = (target_x, target_y)
 
-        # Convert target to grid coordinates to verify it's within bounds
-        target_grid = self.world_map.world_to_grid(target_x, target_y)
-        if (target_grid[0] < 0 or target_grid[0] >= self.world_map.grid_size or
-                target_grid[1] < 0 or target_grid[1] >= self.world_map.grid_size):
-            print("Target position is outside the grid bounds")
-            self.is_navigating = False
-            return False
-
-        while self.is_navigating:
-            try:
-                # Get current position
+        try:
+            while self.is_navigating:
                 current_pos = self.px.get_position()
-                start_pos = (current_pos['x'], current_pos['y'])
-
-                # Convert to grid coordinates
-                start_grid = self.world_map.world_to_grid(start_pos[0], start_pos[1])
-
-                # Verify current position is within bounds
-                if (start_grid[0] < 0 or start_grid[0] >= self.world_map.grid_size or
-                        start_grid[1] < 0 or start_grid[1] >= self.world_map.grid_size):
-                    print("Current position is outside the grid bounds")
-                    self.is_navigating = False
-                    return False
-
-                # Find path to target
-                path = self.pathfinder.find_path(start_pos, (target_x, target_y))
-
-                if not path:
-                    print("No valid path found to target")
-                    self.is_navigating = False
-                    return False
-
-                print(f"Found path with {len(path)} waypoints")
-                self.current_path = path
-                self.current_path_index = 0
-
-                # Follow path
-                while self.current_path_index < len(self.current_path):
-                    if not self.is_navigating:
-                        break
-
-                    # Get next waypoint
-                    waypoint = self.current_path[self.current_path_index]
-
-                    # Convert waypoint to grid coordinates for distance check
-                    waypoint_grid = self.world_map.world_to_grid(waypoint[0], waypoint[1])
-                    current_grid = self.world_map.world_to_grid(current_pos['x'], current_pos['y'])
-
-                    # Calculate grid cell distance to detect obstacles
-                    grid_distance = np.sqrt(
-                        (waypoint_grid[0] - current_grid[0]) ** 2 +
-                        (waypoint_grid[1] - current_grid[1]) ** 2
-                    )
-
-                    # Calculate heading to waypoint
-                    target_heading = self.px.get_target_heading(waypoint[0], waypoint[1])
-
-                    # Turn to face waypoint
-                    await self.px.turn_to_heading(target_heading)
-
-                    # Move forward
-                    self.is_moving = True
-                    self.px.forward(self.speed)
-
-                    # Wait until we reach waypoint or detect obstacle
-                    while self.is_moving:
-                        current_pos = self.px.get_position()
-                        current_grid = self.world_map.world_to_grid(current_pos['x'], current_pos['y'])
-
-                        # Calculate both real-world and grid distances
-                        dist_to_waypoint = np.sqrt(
-                            (waypoint[0] - current_pos['x']) ** 2 +
-                            (waypoint[1] - current_pos['y']) ** 2
-                        )
-
-                        grid_dist_to_waypoint = np.sqrt(
-                            (waypoint_grid[0] - current_grid[0]) ** 2 +
-                            (waypoint_grid[1] - current_grid[1]) ** 2
-                        )
-
-                        # Check if we've reached waypoint (within 1/4 grid cell)
-                        if grid_dist_to_waypoint < 0.25:
-                            self.current_path_index += 1
-                            break
-
-                        # If obstacle detected within 1 grid cell
-                        obstacle_grid_dist = self.current_distance / self.world_map.resolution
-                        if (obstacle_grid_dist <= 1.0 or
-                                not self.pathfinder.is_line_of_sight_clear(
-                                    (current_pos['x'], current_pos['y']),
-                                    waypoint
-                                )):
-                            print(f"Obstacle detected at {obstacle_grid_dist:.1f} grid cells away")
-                            self.px.forward(0)
-                            self.is_moving = False
-
-                            # Scan environment and update map
-                            await self.scan_environment()
-                            self.world_map.add_padding()
-
-                            # Break inner loop to recalculate path
-                            break
-
-                        await asyncio.sleep(0.1)
 
                 # Check if we've reached the target
-                if self.current_path_index >= len(self.current_path):
+                dist_to_target = math.sqrt(
+                    (target_x - current_pos['x']) ** 2 +
+                    (target_y - current_pos['y']) ** 2
+                )
+                if dist_to_target < 20:  # Within 20cm
                     print("Reached target!")
+                    self.px.stop()
                     self.is_navigating = False
-                    self.px.forward(0)
                     return True
 
-            except asyncio.CancelledError:
-                self.is_navigating = False
-                self.px.forward(0)
-                raise
+                # Plan or update path
+                if (not self.current_path or
+                        self.current_distance < self.min_distance or  # Obstacle detected
+                        not self.pathfinder.is_path_clear(self.current_path)):  # Path blocked
 
-            await asyncio.sleep(0.1)
+                    print("Planning new path...")
+                    # Scan environment if obstacle detected
+                    if self.current_distance < self.min_distance:
+                        await self.scan_environment()
+                        self.world_map.add_padding()
 
-        return False
+                    # Find new path
+                    self.current_path = self.pathfinder.find_path(
+                        current_pos['x'], current_pos['y'],
+                        target_x, target_y
+                    )
+
+                    if not self.current_path:
+                        print("No valid path found!")
+                        self.px.stop()
+                        self.is_navigating = False
+                        return False
+
+                    # Smooth path
+                    self.current_path = self.pathfinder.smooth_path(self.current_path)
+                    self.current_path_index = 0
+
+                # Follow current path
+                if self.current_path_index < len(self.current_path):
+                    next_x, next_y = self.current_path[self.current_path_index]
+
+                    # Calculate heading to next waypoint
+                    target_heading = self.px.get_target_heading(next_x, next_y)
+                    angle_diff = target_heading - current_pos['heading']
+                    # Normalize to -180 to 180
+                    angle_diff = (angle_diff + 180) % 360 - 180
+
+                    # Set steering and speed
+                    steering_angle = self.px.calculate_steering_angle(angle_diff)
+                    self.px.set_dir_servo_angle(steering_angle)
+
+                    # Adjust speed based on turn sharpness
+                    speed = self.speed * (1 - abs(steering_angle) / self.px.MAX_STEERING_ANGLE * 0.5)
+                    self.px.forward(speed)
+                    self.is_moving = True
+
+                    # Check if waypoint reached
+                    dist_to_waypoint = math.sqrt(
+                        (next_x - current_pos['x']) ** 2 +
+                        (next_y - current_pos['y']) ** 2
+                    )
+                    if dist_to_waypoint < 20:  # Within 20cm
+                        self.current_path_index += 1
+
+                await asyncio.sleep(0.1)
+
+        except asyncio.CancelledError:
+            print("Navigation cancelled")
+            self.px.stop()
+            self.is_navigating = False
+            raise
+        except Exception as e:
+            print(f"Navigation error: {e}")
+            self.px.stop()
+            self.is_navigating = False
+            raise
 
     async def run(self):
         print("Starting enhanced obstacle avoidance program...")
