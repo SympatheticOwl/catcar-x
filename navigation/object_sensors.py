@@ -10,10 +10,10 @@ class AsyncObstacleAvoidance:
         self.px = Picarx()
 
         # configuration parameters
-        self.min_distance = 15
+        self.min_distance = 25
         self.backup_time = 1.0
         self.long_backup_time = 2.0
-        self.turn_time = 1.5
+        self.turn_time = 1.2
         self.speed = 30
         self.sensor_read_freq = 0.05
 
