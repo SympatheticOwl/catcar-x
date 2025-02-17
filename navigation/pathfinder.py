@@ -119,7 +119,7 @@ class Pathfinder:
         self.px.set_cam_pan_angle(original_angle)
 
         # Add padding around detected obstacles
-        self.world_map.add_padding()
+        # self.world_map.add_padding()
         print("Environment scan complete")
 
     async def find_path(self, start_x: float, start_y: float,

@@ -331,7 +331,7 @@ class AsyncObstacleAvoidance:
             # Initial environment scan if this is first attempt or after obstacle
             if retry_count == 0 or self.current_path is None:
                 print("Performing initial environment scan...")
-                await self.pathfinder.scan_environment()
+                await self.scan_environment()
 
             # Find path to target
             print("Calculating path to target...")
@@ -359,7 +359,7 @@ class AsyncObstacleAvoidance:
 
                 # Scan for new obstacles
                 print("Scanning for obstacles...")
-                await self.pathfinder.scan_environment()
+                await self.scan_environment()
 
                 # Increment retry counter
                 retry_count += 1

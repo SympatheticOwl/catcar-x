@@ -28,14 +28,12 @@ class WorldMap:
         grid_x = max(0, min(grid_x, self.grid_size - 1))
         grid_y = max(0, min(grid_y, self.grid_size - 1))
 
-        print(f"Converting world ({x}, {y}) to grid ({grid_x}, {grid_y})")
         return grid_x, grid_y
 
     def grid_to_world(self, grid_x: int, grid_y: int) -> Tuple[float, float]:
         """Convert grid coordinates to world coordinates (cm)"""
         x = (grid_x - self.origin[0]) * self.resolution
         y = (grid_y - self.origin[1]) * self.resolution
-        print(f"Converting grid ({grid_x}, {grid_y}) to world ({x}, {y})")
         return x, y
 
     def add_obstacle(self, x: float, y: float, radius: float = 10.0, confidence: float = 1.0,
