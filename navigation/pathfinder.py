@@ -16,86 +16,95 @@ class Pathfinder:
         self.world_map = world_map
         self.picar = picar
 
-        # Verify and adjust grid resolution if needed
-        if self.world_map.resolution > 10.0:  # If resolution is too coarse
-            print(f"Warning: Grid resolution is too coarse ({self.world_map.resolution}cm)")
-            print("Consider initializing WorldMap with resolution=10.0 for better navigation")
-
-        # Movement directions (8-directional)
-        self.DIRECTIONS = [
-            (0, 1),  # N
-            (1, 1),  # NE
-            (1, 0),  # E
-            (1, -1),  # SE
-            (0, -1),  # S
-            (-1, -1),  # SW
-            (-1, 0),  # W
-            (-1, 1),  # NW
-        ]
-
         # Movement costs
         self.STRAIGHT_COST = 1.0
         self.DIAGONAL_COST = 1.4  # sqrt(2)
-        self.TURN_COST = 1.0  # Cost for changing direction
+        self.TURN_COST = 0.5  # Additional cost for changing direction
 
+        # Calculate grid cell size based on car's turning radius
+        self.min_turn_radius = picar.get_min_turn_radius()
         self.grid_cell_size = world_map.resolution
 
+
     def find_path(self, start_x: float, start_y: float, goal_x: float, goal_y: float) -> List[Tuple[int, int]]:
-        """Find path from start to goal using A* algorithm with 8-directional movement"""
+        """Find path from start to goal using A* algorithm"""
         # Convert world coordinates to grid coordinates
         start_grid = self.world_map.world_to_grid(start_x, start_y)
         goal_grid = self.world_map.world_to_grid(goal_x, goal_y)
 
         # Initialize data structures
-        frontier = []
-        heapq.heappush(frontier, (0, start_grid, None))  # Include current direction
+        frontier = []  # Priority queue
+        heapq.heappush(frontier, (0, start_grid))
         came_from = {start_grid: None}
         cost_so_far = {start_grid: 0}
-        direction_so_far = {start_grid: None}
 
         while frontier:
-            current_cost, current, current_dir = heapq.heappop(frontier)
+            current = heapq.heappop(frontier)[1]
 
             if current == goal_grid:
                 break
 
-            for direction in self.DIRECTIONS:
-                next_pos = (current[0] + direction[0], current[1] + direction[1])
-
-                # Skip if out of bounds
-                if not (0 <= next_pos[0] < self.world_map.grid_size and
-                        0 <= next_pos[1] < self.world_map.grid_size):
-                    continue
-
-                # Skip if obstacle
-                if self.world_map.grid[next_pos[1], next_pos[0]] != 0:
-                    continue
-
-                # Calculate movement cost
-                movement_cost = self.DIAGONAL_COST if (direction[0] != 0 and direction[1] != 0) else self.STRAIGHT_COST
-
-                # Add turn cost if changing direction
-                if current_dir is not None and direction != current_dir:
-                    movement_cost += self.TURN_COST
-
-                new_cost = cost_so_far[current] + movement_cost
+            # Get valid neighbors considering car's turning radius
+            for next_pos in self._get_neighbors(current):
+                # Calculate new cost including turning penalties
+                new_cost = cost_so_far[current] + self._movement_cost(current, next_pos)
 
                 if next_pos not in cost_so_far or new_cost < cost_so_far[next_pos]:
                     cost_so_far[next_pos] = new_cost
                     priority = new_cost + self._heuristic(next_pos, goal_grid)
-                    heapq.heappush(frontier, (priority, next_pos, direction))
+                    heapq.heappush(frontier, (priority, next_pos))
                     came_from[next_pos] = current
-                    direction_so_far[next_pos] = direction
 
         # Reconstruct path
-        path = self._reconstruct_path(came_from, start_grid, goal_grid)
-        return self._extract_waypoints(path, direction_so_far)
+        return self._reconstruct_path(came_from, start_grid, goal_grid)
+
+
+    def _get_neighbors(self, pos: Tuple[int, int]) -> List[Tuple[int, int]]:
+        """Get valid neighboring grid cells"""
+        x, y = pos
+        neighbors = []
+
+        # Check straight and diagonal moves
+        for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0), (1, 1), (1, -1), (-1, 1), (-1, -1)]:
+            new_x, new_y = x + dx, y + dy
+
+            # Check grid bounds
+            if (0 <= new_x < self.world_map.grid_size and
+                    0 <= new_y < self.world_map.grid_size):
+
+                # Check if move is valid (no obstacles)
+                if self.world_map.grid[new_y, new_x] == 0:
+                    # For diagonal moves, check both adjacent cells
+                    if abs(dx) == 1 and abs(dy) == 1:
+                        if (self.world_map.grid[y, new_x] == 0 and
+                                self.world_map.grid[new_y, x] == 0):
+                            neighbors.append((new_x, new_y))
+                    else:
+                        neighbors.append((new_x, new_y))
+
+        return neighbors
+
+
+    def _movement_cost(self, current: Tuple[int, int], next_pos: Tuple[int, int]) -> float:
+        """Calculate movement cost between adjacent cells"""
+        dx = abs(next_pos[0] - current[0])
+        dy = abs(next_pos[1] - current[1])
+
+        # Diagonal movement
+        if dx == 1 and dy == 1:
+            return self.DIAGONAL_COST
+
+        # Straight movement
+        return self.STRAIGHT_COST
+
 
     def _heuristic(self, pos: Tuple[int, int], goal: Tuple[int, int]) -> float:
-        """Calculate heuristic distance to goal using octile distance"""
+        """Calculate heuristic distance to goal"""
+        # Using diagonal distance
         dx = abs(pos[0] - goal[0])
         dy = abs(pos[1] - goal[1])
         return max(dx, dy) + (math.sqrt(2) - 1) * min(dx, dy)
+
 
     def _reconstruct_path(self, came_from: dict, start: Tuple[int, int],
                           goal: Tuple[int, int]) -> List[Tuple[int, int]]:
@@ -113,37 +122,29 @@ class Pathfinder:
         path.reverse()
         return path
 
-    def _extract_waypoints(self, path: List[Tuple[int, int]], directions: dict) -> List[Tuple[int, int]]:
-        """Extract key waypoints where direction changes"""
+
+    def smooth_path(self, path: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
+        """Smooth path to reduce unnecessary turns"""
         if len(path) <= 2:
             return path
 
-        waypoints = [path[0]]
+        smoothed = [path[0]]
         current_direction = None
 
-        for i in range(1, len(path)):
-            pos = path[i]
-            direction = directions.get(pos)
+        for i in range(1, len(path) - 1):
+            prev = path[i - 1]
+            current = path[i]
+            next_pos = path[i + 1]
 
-            if direction != current_direction:
-                waypoints.append(path[i - 1])
-                current_direction = direction
+            # Calculate directions
+            dx1 = current[0] - prev[0]
+            dy1 = current[1] - prev[1]
+            dx2 = next_pos[0] - current[0]
+            dy2 = next_pos[1] - current[1]
 
-        if waypoints[-1] != path[-1]:
-            waypoints.append(path[-1])
+            # If direction changes, keep the point
+            if dx1 != dx2 or dy1 != dy2:
+                smoothed.append(current)
 
-        return waypoints
-
-    def get_direction_to_point(self, current_x: int, current_y: int,
-                               target_x: int, target_y: int) -> float:
-        """Get heading angle for 8-directional movement"""
-        dx = target_x - current_x
-        dy = target_y - current_y
-        angle = math.degrees(math.atan2(dy, dx))
-
-        # Convert to 8 cardinal/ordinal directions
-        normalized_angle = (angle + 360) % 360
-        direction_angles = [0, 45, 90, 135, 180, 225, 270, 315]
-        closest_angle = min(direction_angles, key=lambda x: abs(x - normalized_angle))
-
-        return closest_angle
+        smoothed.append(path[-1])
+        return smoothed
