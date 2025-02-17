@@ -1,5 +1,7 @@
 import heapq
 import math
+import time
+
 import numpy as np
 from typing import List, Tuple, Dict, Set
 import asyncio
@@ -194,9 +196,17 @@ class Pathfinder:
             print(f"Current grid: ({current_grid_x}, {current_grid_y})")
             print(f"Target grid: ({target_grid_x}, {target_grid_y})")
 
-            # Check if we've reached the target
-            if (abs(current_pos['x'] - target_x) < self.world_map.resolution and
-                    abs(current_pos['y'] - target_y) < self.world_map.resolution):
+            # Check if we've reached the target - use actual car position
+            car_pos = self.picar.get_position()
+            distance_to_target = math.sqrt(
+                (car_pos['x'] - target_x) ** 2 +
+                (car_pos['y'] - target_y) ** 2
+            )
+            print(f"Distance to target: {distance_to_target:.1f}cm")
+            print(f"Car position: ({car_pos['x']:.1f}, {car_pos['y']:.1f})")
+            print(f"Target position: ({target_x:.1f}, {target_y:.1f})")
+
+            if distance_to_target < self.world_map.resolution * 2:  # Give a bit more margin
                 print("Target reached!")
                 self.is_navigating = False
                 self.picar.stop()
@@ -236,9 +246,28 @@ class Pathfinder:
             print("Moving forward...")
             self.picar.forward(self.base_speed)
 
-            # Wait for movement to complete
+            # Wait for movement while checking position
             movement_time = distance / (self.base_speed * self.picar.WHEEL_CIRCUMFERENCE / 60)
-            await asyncio.sleep(movement_time)
+            start_time = time.time()
+
+            while time.time() - start_time < movement_time:
+                # Check current position
+                car_pos = self.picar.get_position()
+                distance_to_target = math.sqrt(
+                    (car_pos['x'] - target_x) ** 2 +
+                    (car_pos['y'] - target_y) ** 2
+                )
+
+                print(f"Moving - Distance to target: {distance_to_target:.1f}cm")
+                print(f"Car position: ({car_pos['x']:.1f}, {car_pos['y']:.1f})")
+
+                if distance_to_target < self.world_map.resolution * 2:
+                    print("Target reached during movement!")
+                    self.picar.stop()
+                    self.is_navigating = False
+                    return
+
+                await asyncio.sleep(0.1)  # Check every 100ms
 
             self.picar.stop()
             self.current_path_index += 1
