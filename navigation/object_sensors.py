@@ -267,6 +267,7 @@ class AsyncObstacleAvoidance:
         while True:
             current_pos = self.px.get_position()
             current_x, current_y = current_pos['x'], current_pos['y']
+            print(f'current_pos: {current_pos}')
 
             # Check if we've reached the target
             distance_to_target = math.sqrt(
@@ -285,23 +286,24 @@ class AsyncObstacleAvoidance:
                     current_x, current_y,
                     target_x, target_y
                 )
+                print(f'initial path: {path}')
                 if not path:
                     print("No valid path found!")
                     self.px.stop()
                     return False
 
             # Scan environment and update world map
-            if self.current_distance < self.min_distance or not self.vision_clear:
+            if self.emergency_stop_flag or self.current_distance < self.min_distance or not self.vision_clear:
                 print("Obstacle detected! Updating world map...")
-                self.px.stop()
-                await self.scan_environment()
-
+                await self.current_maneuver
+                print("current_maneuver done...")
                 # Recalculate path
                 print("Recalculating path...")
                 path = self.pathfinder.update_path(
                     current_x, current_y,
                     target_x, target_y
                 )
+                print(f'new path: {path}')
                 if not path:
                     print("No valid path found after obstacle detection!")
                     return False
