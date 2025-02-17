@@ -45,11 +45,8 @@ class AsyncObstacleAvoidance:
         self.vision_enabled = True
         self.vision_clear = True
 
-        map_size = 100
-        self.map_size = map_size
-        self.map = np.zeros((map_size, map_size))
-        self.car_pos = np.array([0, map_size // 2])
-        self.car_angle = 0
+        self.scan_range = (-60, 60)
+        self.scan_step = 5
 
 
     def _update_ultrasonic_detection(self, distance: float):
@@ -147,27 +144,48 @@ class AsyncObstacleAvoidance:
         self.px.set_dir_servo_angle(0)
         await asyncio.sleep(0.5)
         self.emergency_stop_flag = False
-        # self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
+        self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
 
-    def find_best_direction(self, scan_data):
-        """Analyze scan data to find the best direction to move, accounting for padded obstacles"""
+    def find_best_direction(self):
+        """Analyze scan data to find the best direction to move"""
         max_distance = 0
         best_angle = 0
 
-        # Consider the padded map when finding the best direction
-        for angle, distance in scan_data:
-            # Convert the measured point to map coordinates
-            point = self._polar_to_cartesian(angle, distance)
-            map_x = int(point[0] + self.map_size // 2)
-            map_y = int(point[1] + self.map_size // 2)
+        # Convert current position to grid coordinates
+        curr_pos = self.px.get_position()
+        curr_grid_x, curr_grid_y = self.world_map.world_to_grid(curr_pos['x'], curr_pos['y'])
 
-            # Check if the point and its surrounding area (padding) are clear
-            if (0 <= map_x < self.map_size and
-                    0 <= map_y < self.map_size and
-                    not self.map[map_y, map_x]):  # Check padded map
-                if distance > max_distance:
-                    max_distance = distance
-                    best_angle = angle
+        # Check angles in scan range
+        start_angle, end_angle = self.scan_range
+        for angle in range(start_angle, end_angle + 1, self.scan_step):
+            # Convert angle to radians
+            angle_rad = math.radians(angle)
+
+            # Look ahead in this direction (check multiple distances)
+            max_check_distance = 100  # cm
+            check_step = 5  # cm
+
+            # Find distance to first obstacle in this direction
+            distance_to_obstacle = max_check_distance
+
+            for dist in range(check_step, max_check_distance, check_step):
+                # Calculate point to check in grid coordinates
+                check_x = curr_grid_x + int(dist * math.cos(angle_rad) / self.world_map.resolution)
+                check_y = curr_grid_y + int(dist * math.sin(angle_rad) / self.world_map.resolution)
+
+                # Ensure within grid bounds
+                if (0 <= check_x < self.world_map.grid_size and
+                        0 <= check_y < self.world_map.grid_size):
+
+                    # If we hit an obstacle, record distance and stop checking this direction
+                    if self.world_map.grid[check_y, check_x] != 0:
+                        distance_to_obstacle = dist
+                        break
+
+            # Update best direction if this is the clearest path
+            if distance_to_obstacle > max_distance:
+                max_distance = distance_to_obstacle
+                best_angle = angle
 
         return best_angle, max_distance
 
@@ -180,7 +198,7 @@ class AsyncObstacleAvoidance:
 
             await self.scan_environment()
             # add padding once scanning is done
-            # self.world_map.add_padding()
+            self.world_map.add_padding()
 
             best_angle, max_distance = self.find_best_direction()
 
@@ -225,6 +243,22 @@ class AsyncObstacleAvoidance:
                             if obj['label'] == "stop sign":
                                 print("STOP!!!!")
                                 self.vision_clear = False
+                                await asyncio.sleep(3)
+                            if obj['label'] == "cat" or obj['label'] == "person":
+                                print("DON'T HURT THE CAT!!!!")
+                                self.vision_clear = False
+                                await self.emergency_stop()
+                                self.emergency_stop_flag = True
+                                # cancel any ongoing maneuver except backup
+                                if self.current_maneuver:
+                                    self.current_maneuver.cancel()
+
+                                self.is_moving = False
+                                self.px.forward(0)
+                                self.px.set_dir_servo_angle(0)
+                                await asyncio.sleep(0.5)
+                            else:
+                                self.emergency_stop_flag = False
 
                 if (self.current_distance >= self.min_distance and not self.is_cliff):
                     if not self.is_moving:
@@ -293,7 +327,7 @@ class AsyncObstacleAvoidance:
             vision_task = asyncio.create_task(self.vision.capture_and_detect())
             ultrasonic_task = asyncio.create_task(self.ultrasonic_monitoring())
             cliff_task = asyncio.create_task(self.cliff_monitoring())
-            navigation_task = asyncio.create_task(self.navigate_to_point(100, -100))
+            navigation_task = asyncio.create_task(self.forward_movement())
 
             tasks = [
                 pos_track_task,

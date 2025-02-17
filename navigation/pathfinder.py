@@ -1,277 +1,216 @@
-import numpy as np
-from typing import List, Tuple, Set, Dict
-import math
-import heapq
 import asyncio
+import heapq
+import numpy as np
+import math
+import time
+from dataclasses import dataclass, field
+from heapq import heappush, heappop
+from typing import List, Tuple, Optional, Set, Dict
 
-
-class Node:
-    def __init__(self, parent=None, position=None):
-        self.parent = parent
-        self.position = position
-        self.g = 0
-        self.h = 0
-        self.f = 0
-
-    def __eq__(self, other):
-        return self.position == other.position
-
-    def __lt__(self, other):
-        return self.f < other.f
+from picarx_wrapper import PicarXWrapper
+from world_map import WorldMap
 
 
 class Pathfinder:
-    def __init__(self, world_map, picar):
+    def __init__(self, world_map: WorldMap, picarx: PicarXWrapper):
         self.world_map = world_map
-        self.px = picar
+        self.picarx = picarx
 
-    def astar(self, start, end):
-        """A* pathfinding algorithm"""
-        start_node = Node(None, start)
-        start_node.g = start_node.h = start_node.f = 0
-        end_node = Node(None, end)
-        end_node.g = end_node.h = end_node.f = 0
+        # Movement costs
+        self.STRAIGHT_COST = 1.0
+        self.DIAGONAL_COST = 1.4  # sqrt(2)
 
-        open_list = []
-        closed_list = []
+        # Possible movement directions (8-directional movement)
+        self.DIRECTIONS = [
+            (-1, -1), (-1, 0), (-1, 1),  # Northwest, North, Northeast
+            (0, -1), (0, 1),  # West, East
+            (1, -1), (1, 0), (1, 1)  # Southwest, South, Southeast
+        ]
 
-        heapq.heappush(open_list, start_node)
+    def _heuristic(self, a: Tuple[int, int], b: Tuple[int, int]) -> float:
+        """Calculate heuristic (diagonal distance) between two points"""
+        dx = abs(a[0] - b[0])
+        dy = abs(a[1] - b[1])
+        return max(dx, dy) + (math.sqrt(2) - 1) * min(dx, dy)
 
-        while len(open_list) > 0:
-            current_node = heapq.heappop(open_list)
-            closed_list.append(current_node)
+    def _get_neighbors(self, current: Tuple[int, int]) -> List[Tuple[int, int]]:
+        """Get valid neighboring grid cells"""
+        neighbors = []
 
-            if current_node == end_node:
-                path = []
-                current = current_node
-                while current is not None:
-                    path.append(current.position)
-                    current = current.parent
-                return path[::-1]
+        for dx, dy in self.DIRECTIONS:
+            new_x = current[0] + dx
+            new_y = current[1] + dy
 
-            children = []
-            for new_position in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
-                node_position = (current_node.position[0] + new_position[0],
-                                 current_node.position[1] + new_position[1])
+            # Check bounds
+            if (0 <= new_x < self.world_map.grid_size and
+                    0 <= new_y < self.world_map.grid_size):
 
-                if (node_position[0] < 0 or node_position[0] >= self.world_map.grid_size or
-                        node_position[1] < 0 or node_position[1] >= self.world_map.grid_size or
-                        self.world_map.grid[node_position[1], node_position[0]] != 0):
-                    continue
+                # Check if cell is obstacle-free and print debugging info
+                if self.world_map.grid[new_y, new_x] == 0:
+                    neighbors.append((new_x, new_y))
+                else:
+                    print(f"Cell ({new_x}, {new_y}) blocked by obstacle")
 
-                new_node = Node(current_node, node_position)
-                children.append(new_node)
+        if not neighbors:
+            print(f"Warning: No valid neighbors found for position {current}")
 
-            for child in children:
-                if child in closed_list:
-                    continue
+        return neighbors
 
-                child.g = current_node.g + 1
-                child.h = ((child.position[0] - end_node.position[0]) ** 2 +
-                           (child.position[1] - end_node.position[1]) ** 2)
-                child.f = child.g + child.h
+    def _movement_cost(self, a: Tuple[int, int], b: Tuple[int, int]) -> float:
+        """Calculate cost of movement between adjacent cells"""
+        dx = abs(a[0] - b[0])
+        dy = abs(a[1] - b[1])
 
-                for open_node in open_list:
-                    if child == open_node and child.g > open_node.g:
-                        continue
+        # Diagonal movement
+        if dx == 1 and dy == 1:
+            return self.DIAGONAL_COST
+        # Straight movement
+        return self.STRAIGHT_COST
 
-                heapq.heappush(open_list, child)
+    def find_path(self, start_x: float, start_y: float,
+                  target_x: float, target_y: float) -> List[Tuple[float, float]]:
+        """
+        Find a path from start to target position using A* algorithm
+        """
+        # Convert world coordinates to grid coordinates
+        start_grid = self.world_map.world_to_grid(start_x, start_y)
+        target_grid = self.world_map.world_to_grid(target_x, target_y)
 
-        return None  # No path found
+        print(f"\nPathfinding from {(start_x, start_y)} to {(target_x, target_y)}")
+        print(f"Grid coordinates: from {start_grid} to {target_grid}")
 
-# class Pathfinder:
-#     def __init__(self, world_map, picar):
-#         self.world_map = world_map
-#         self.picar = picar
-#         self.current_path = []
-#
-#         # Movement costs
-#         self.STRAIGHT_COST = 1.0
-#         self.DIAGONAL_COST = 1.4  # sqrt(2)
-#         self.OBSTACLE_COST = float('inf')
-#
-#         # Neighboring cells (8-directional movement)
-#         self.NEIGHBORS = [
-#             (-1, -1), (-1, 0), (-1, 1),
-#             (0, -1), (0, 1),
-#             (1, -1), (1, 0), (1, 1)
-#         ]
-#
-#     def heuristic(self, start: Tuple[int, int], goal: Tuple[int, int]) -> float:
-#         """Calculate heuristic cost using diagonal distance"""
-#         dx = abs(start[0] - goal[0])
-#         dy = abs(start[1] - goal[1])
-#         return max(dx, dy) + (math.sqrt(2) - 1) * min(dx, dy)
-#
-#     async def get_valid_neighbors(self, node: Tuple[int, int]) -> List[Tuple[int, int]]:
-#         """Get valid neighboring cells that aren't obstacles, with safety margin"""
-#         neighbors = []
-#         x, y = node
-#
-#         for dx, dy in self.NEIGHBORS:
-#             new_x, new_y = x + dx, y + dy
-#
-#             # Check bounds with safety margin
-#             safety_margin = 2  # cells
-#             if (safety_margin <= new_x < self.world_map.grid_size - safety_margin and
-#                     safety_margin <= new_y < self.world_map.grid_size - safety_margin):
-#
-#                 # Check if cell and surrounding area is obstacle-free
-#                 is_safe = True
-#                 for check_dx in range(-1, 2):
-#                     for check_dy in range(-1, 2):
-#                         check_x = new_x + check_dx
-#                         check_y = new_y + check_dy
-#                         if self.world_map.grid[check_y, check_x] != 0:
-#                             is_safe = False
-#                             break
-#                     if not is_safe:
-#                         break
-#
-#                 if is_safe:
-#                     # Check if diagonal move is valid (path must be clear)
-#                     if dx != 0 and dy != 0:
-#                         if (self.world_map.grid[y, new_x] == 0 and
-#                                 self.world_map.grid[new_y, x] == 0):
-#                             neighbors.append((new_x, new_y))
-#                     else:
-#                         neighbors.append((new_x, new_y))
-#
-#         await asyncio.sleep(0)  # Yield to other tasks occasionally
-#         return neighbors
-#
-#     def movement_cost(self, current: Tuple[int, int], next: Tuple[int, int]) -> float:
-#         """Calculate cost of movement between adjacent cells"""
-#         dx = abs(current[0] - next[0])
-#         dy = abs(current[1] - next[1])
-#
-#         # Diagonal movement
-#         if dx == 1 and dy == 1:
-#             return self.DIAGONAL_COST
-#         # Straight movement
-#         return self.STRAIGHT_COST
-#
-#     async def find_path(self, start_x: float, start_y: float,
-#                         goal_x: float, goal_y: float) -> List[Tuple[float, float]]:
-#         """Find path from start to goal using A* algorithm"""
-#         # Convert world coordinates to grid coordinates
-#         start_grid = self.world_map.world_to_grid(start_x, start_y)
-#         goal_grid = self.world_map.world_to_grid(goal_x, goal_y)
-#
-#         # Initialize data structures
-#         frontier = []  # Priority queue
-#         heapq.heappush(frontier, (0, start_grid))
-#         came_from = {start_grid: None}
-#         cost_so_far = {start_grid: 0}
-#
-#         while frontier:
-#             _, current = heapq.heappop(frontier)
-#
-#             if current == goal_grid:
-#                 break
-#
-#             neighbors = await self.get_valid_neighbors(current)
-#             for next_node in neighbors:
-#                 new_cost = cost_so_far[current] + self.movement_cost(current, next_node)
-#
-#                 if next_node not in cost_so_far or new_cost < cost_so_far[next_node]:
-#                     cost_so_far[next_node] = new_cost
-#                     priority = new_cost + self.heuristic(next_node, goal_grid)
-#                     heapq.heappush(frontier, (priority, next_node))
-#                     came_from[next_node] = current
-#
-#             # Yield to other tasks periodically
-#             if len(frontier) % 10 == 0:
-#                 await asyncio.sleep(0)
-#
-#         # Reconstruct path
-#         path_grid = []
-#         current = goal_grid
-#
-#         if current not in came_from:  # No path found
-#             return []
-#
-#         while current is not None:
-#             path_grid.append(current)
-#             current = came_from[current]
-#
-#         path_grid.reverse()
-#
-#         # Convert grid coordinates back to world coordinates
-#         path_world = []
-#         for grid_x, grid_y in path_grid:
-#             world_x, world_y = self.world_map.grid_to_world(grid_x, grid_y)
-#             path_world.append((world_x, world_y))
-#
-#         self.current_path = path_world
-#         return path_world
-#
-#     async def smooth_path(self, path: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
-#         """Smooth the path to make it more suitable for car movement"""
-#         if len(path) <= 2:
-#             return path
-#
-#         smoothed = [path[0]]
-#         i = 0
-#
-#         while i < len(path) - 1:
-#             current = path[i]
-#
-#             # Look ahead to find longest straight-line segment possible
-#             for j in range(len(path) - 1, i, -1):
-#                 if await self.is_clear_path(current, path[j]):
-#                     smoothed.append(path[j])
-#                     i = j
-#                     break
-#             i += 1
-#
-#             # Yield to other tasks periodically
-#             if i % 5 == 0:
-#                 await asyncio.sleep(0)
-#
-#         return smoothed
-#
-#     async def is_clear_path(self, start: Tuple[float, float], end: Tuple[float, float]) -> bool:
-#         """Check if there's a clear straight-line path between two points"""
-#         start_grid = self.world_map.world_to_grid(start[0], start[1])
-#         end_grid = self.world_map.world_to_grid(end[0], end[1])
-#
-#         # Use Bresenham's line algorithm to check cells along the path
-#         x0, y0 = start_grid
-#         x1, y1 = end_grid
-#         dx = abs(x1 - x0)
-#         dy = abs(y1 - y0)
-#
-#         x, y = x0, y0
-#         sx = 1 if x0 < x1 else -1
-#         sy = 1 if y0 < y1 else -1
-#         err = dx - dy
-#
-#         while True:
-#             if x == x1 and y == y1:
-#                 break
-#
-#             if self.world_map.grid[y, x] != 0:
-#                 return False
-#
-#             e2 = 2 * err
-#             if e2 > -dy:
-#                 err -= dy
-#                 x += sx
-#             if e2 < dx:
-#                 err += dx
-#                 y += sy
-#
-#             # Yield periodically during long path checks
-#             if (abs(x - x0) + abs(y - y0)) % 10 == 0:
-#                 await asyncio.sleep(0)
-#
-#         return True
-#
-#     async def update_path(self, current_x: float, current_y: float,
-#                           goal_x: float, goal_y: float) -> List[Tuple[float, float]]:
-#         """Update path based on current position and world state"""
-#         new_path = await self.find_path(current_x, current_y, goal_x, goal_y)
-#         if new_path:
-#             new_path = await self.smooth_path(new_path)
-#         return new_path
+        # Print local grid area around start and target
+        print("\nGrid area around start position:")
+        self._print_local_grid(start_grid[0], start_grid[1])
+        print("\nGrid area around target position:")
+        self._print_local_grid(target_grid[0], target_grid[1])
+
+        # Check if target is reachable
+        if self.world_map.grid[target_grid[1], target_grid[0]] != 0:
+            print("Target position is blocked by obstacle")
+            return []
+
+        # Initialize data structures
+        frontier = []  # Priority queue of nodes to explore
+        heapq.heappush(frontier, (0, start_grid))
+
+        came_from = {start_grid: None}  # Path tracking
+        cost_so_far = {start_grid: 0}  # Cost to reach each node
+
+        explored_count = 0
+        max_iterations = self.world_map.grid_size * self.world_map.grid_size  # Prevent infinite loops
+
+        # A* search
+        while frontier and explored_count < max_iterations:
+            current = heapq.heappop(frontier)[1]
+            explored_count += 1
+
+            # Path found
+            if current == target_grid:
+                print(f"Path found after exploring {explored_count} cells")
+                break
+
+            # Explore neighbors
+            neighbors = self._get_neighbors(current)
+            for next_pos in neighbors:
+                new_cost = cost_so_far[current] + self._movement_cost(current, next_pos)
+
+                if next_pos not in cost_so_far or new_cost < cost_so_far[next_pos]:
+                    cost_so_far[next_pos] = new_cost
+                    priority = new_cost + self._heuristic(next_pos, target_grid)
+                    heapq.heappush(frontier, (priority, next_pos))
+                    came_from[next_pos] = current
+
+        # Check if path was found
+        if target_grid not in came_from:
+            print(f"No path found after exploring {explored_count} cells")
+            print(f"Frontier size: {len(frontier)}")
+            print(f"Final distance to target: {self._heuristic(current, target_grid)}")
+            return []
+
+        # Reconstruct path
+        path = []
+        current = target_grid
+        while current is not None:
+            path.append(current)
+            current = came_from[current]
+        path.reverse()
+
+        # Convert back to world coordinates and add debug output
+        world_path = []
+        for x, y in path:
+            wx, wy = self.world_map.grid_to_world(x, y)
+            world_path.append((wx, wy))
+            print(f"Path point: grid({x}, {y}) -> world({wx:.1f}, {wy:.1f})")
+
+        return world_path
+
+    def _print_local_grid(self, x: int, y: int, radius: int = 3):
+        """Print a section of the grid around a point"""
+        x_min = max(0, x - radius)
+        x_max = min(self.world_map.grid_size, x + radius + 1)
+        y_min = max(0, y - radius)
+        y_max = min(self.world_map.grid_size, y + radius + 1)
+
+        for j in range(y_min, y_max):
+            row = ""
+            for i in range(x_min, x_max):
+                if i == x and j == y:
+                    row += "X"  # Current position
+                else:
+                    row += "█" if self.world_map.grid[j, i] else "·"
+            print(row)
+
+    def smooth_path(self, path: List[Tuple[float, float]],
+                    smoothing_strength: float = 0.5) -> List[Tuple[float, float]]:
+        """Apply path smoothing to reduce sharp turns"""
+        if len(path) <= 2:
+            return path
+
+        smoothed = list(path)
+        change = True
+        iterations = 0
+        max_iterations = 10  # Limit smoothing iterations
+
+        while change and iterations < max_iterations:
+            change = False
+            iterations += 1
+
+            for i in range(1, len(smoothed) - 1):
+                old_x, old_y = smoothed[i]
+
+                # Calculate smoothed position
+                new_x = old_x + smoothing_strength * (smoothed[i - 1][0] + smoothed[i + 1][0] - 2 * old_x)
+                new_y = old_y + smoothing_strength * (smoothed[i - 1][1] + smoothed[i + 1][1] - 2 * old_y)
+
+                # Verify smoothed position is valid (not in obstacle)
+                grid_x, grid_y = self.world_map.world_to_grid(new_x, new_y)
+                if self.world_map.grid[grid_y, grid_x] == 0:
+                    smoothed[i] = (new_x, new_y)
+                    if abs(new_x - old_x) > 0.1 or abs(new_y - old_y) > 0.1:
+                        change = True
+
+        print(f"Path smoothing completed after {iterations} iterations")
+        return smoothed
+
+    def is_path_clear(self, path: List[Tuple[float, float]], clearance: float = 20.0) -> bool:
+        """Check if path is clear of obstacles"""
+        if not path:
+            return False
+
+        for i in range(len(path) - 1):
+            start = path[i]
+            end = path[i + 1]
+
+            # Check points along the line segment
+            steps = max(5, int(math.dist(start, end) / clearance))
+            for t in range(steps + 1):
+                x = start[0] + (end[0] - start[0]) * t / steps
+                y = start[1] + (end[1] - start[1]) * t / steps
+
+                grid_x, grid_y = self.world_map.world_to_grid(x, y)
+                if self.world_map.grid[grid_y, grid_x] != 0:
+                    print(f"Path blocked at world({x:.1f}, {y:.1f}) grid({grid_x}, {grid_y})")
+                    return False
+
+        return True
