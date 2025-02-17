@@ -317,9 +317,20 @@ class AsyncObstacleAvoidance:
                     )
 
                     # Turn to target heading first
-                    if abs(target_heading - current_pos['heading']) > 5:
-                        print(f"Turning to heading {target_heading}")
+                    heading_diff = target_heading - current_pos['heading']
+                    # Normalize to -180 to 180
+                    heading_diff = ((heading_diff + 180) % 360) - 180
+
+                    if abs(heading_diff) > 5:
+                        print(f"Turning to heading {target_heading} (current: {current_pos['heading']})")
+                        # Stop any current movement
+                        self.is_moving = False
+                        self.px.forward(0)
+                        await asyncio.sleep(0.5)  # Brief pause
+
+                        # Execute turn
                         await self.px.turn_to_heading(target_heading)
+                        await asyncio.sleep(0.5)  # Wait for stability
 
                     # Move forward until we reach the waypoint
                     distance_to_waypoint = math.sqrt(
@@ -327,7 +338,7 @@ class AsyncObstacleAvoidance:
                         (next_world_point[1] - current_pos['y']) ** 2
                     )
 
-                    if distance_to_waypoint > self.world_map.grid_size * 0.5:  # Half grid cell threshold
+                    if distance_to_waypoint > self.grid_cell_size * 0.5:  # Half grid cell threshold
                         self.is_moving = True
                         self.px.forward(self.speed)
 
@@ -341,7 +352,7 @@ class AsyncObstacleAvoidance:
                                 (next_world_point[1] - current_pos['y']) ** 2
                             )
 
-                            if distance_to_waypoint <= self.world_map.grid_size * 0.5:
+                            if distance_to_waypoint <= self.grid_cell_size * 0.5:
                                 break
 
                             await asyncio.sleep(0.1)

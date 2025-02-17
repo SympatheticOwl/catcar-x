@@ -16,6 +16,11 @@ class Pathfinder:
         self.world_map = world_map
         self.picar = picar
 
+        # Verify and adjust grid resolution if needed
+        if self.world_map.resolution > 10.0:  # If resolution is too coarse
+            print(f"Warning: Grid resolution is too coarse ({self.world_map.resolution}cm)")
+            print("Consider initializing WorldMap with resolution=10.0 for better navigation")
+
         # Movement directions (8-directional)
         self.DIRECTIONS = [
             (0, 1),  # N
