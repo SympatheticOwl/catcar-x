@@ -294,7 +294,7 @@ class AsyncObstacleAvoidance:
             if self.current_distance < self.min_distance or not self.vision_clear:
                 print("Obstacle detected! Updating world map...")
                 self.px.stop()
-                await self.evasive_maneuver()
+                await self.scan_environment()
 
                 # Recalculate path
                 print("Recalculating path...")
