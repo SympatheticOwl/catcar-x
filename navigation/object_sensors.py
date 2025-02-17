@@ -13,7 +13,7 @@ class AsyncObstacleAvoidance:
     def __init__(self):
         # World mapping
         self.px = PicarXWrapper()
-        self.world_map = WorldMap(map_size=200, resolution=42.0)  # 4m x 4m map, 1cm resolution
+        self.world_map = WorldMap(map_size=400, resolution=40.0)  # 4m x 4m map, 1cm resolution
         self.pathfinder = Pathfinder(self.world_map, self.px)
 
         # Sensor offsets from center
@@ -238,66 +238,122 @@ class AsyncObstacleAvoidance:
             self.current_maneuver = None
 
     async def navigate_to_target(self, target_x: float, target_y: float):
-        """Navigate to target while avoiding obstacles"""
+        """Navigate to target coordinates while avoiding obstacles"""
         print(f"Starting navigation to target ({target_x}, {target_y})")
         self.navigation_target = (target_x, target_y)
         self.is_navigating = True
 
         try:
-            # Initial environment scan
-            await self.scan_environment()
+            while self.is_navigating:
+                # Get current position
+                current_pos = self.px.get_position()
+                current_x, current_y = current_pos['x'], current_pos['y']
 
-            # Start continuous monitoring tasks if not already running
-            if not self.current_maneuver:
-                ultrasonic_task = asyncio.create_task(self.ultrasonic_monitoring())
-                cliff_task = asyncio.create_task(self.cliff_monitoring())
-                vision_task = asyncio.create_task(self.vision.capture_and_detect())
+                # Check if we've reached the target
+                distance_to_target = math.sqrt(
+                    (target_x - current_x) ** 2 + (target_y - current_y) ** 2
+                )
+                if distance_to_target < 10:  # Within 10cm
+                    print("Reached target!")
+                    self.px.stop()
+                    self.is_navigating = False
+                    return True
 
-            # Start navigation
-            await self.pathfinder.navigate_to_target(target_x, target_y)
+                # Convert current and target positions to grid coordinates
+                current_grid = self.world_map.world_to_grid(current_x, current_y)
+                target_grid = self.world_map.world_to_grid(target_x, target_y)
+
+                # Find path to target
+                path = self.pathfinder.find_path(current_grid, target_grid)
+                if not path:
+                    print("No path found to target!")
+                    self.px.stop()
+                    self.is_navigating = False
+                    return False
+
+                # Post-process path
+                path = self.pathfinder.post_process_path(path)
+                self.current_path = path
+                self.current_path_index = 0
+
+                # Follow path until interrupted or completed
+                while self.current_path_index < len(self.current_path):
+                    # Check vision system for obstacles
+                    vision_obstacles = self.vision.get_obstacle_info()
+                    if vision_obstacles:
+                        for obstacle in vision_obstacles:
+                            if obstacle['label'] in ['person', 'cat']:
+                                print(f"Detected {obstacle['label']}, waiting...")
+                                self.px.stop()
+                                await asyncio.sleep(0.5)
+                                continue
+                            elif obstacle['label'] == 'stop sign':
+                                print("Stop sign detected, stopping for 3 seconds")
+                                self.px.stop()
+                                await asyncio.sleep(3)
+
+                    # Get next waypoint
+                    next_x, next_y = self.current_path[self.current_path_index]
+
+                    # Calculate heading to waypoint
+                    target_heading = self.px.get_target_heading(next_x, next_y)
+
+                    # Turn to target heading
+                    await self.px.turn_to_heading(target_heading)
+
+                    # Move forward
+                    self.is_moving = True
+                    self.px.forward(self.speed)
+
+                    # Wait for waypoint or interruption
+                    while True:
+                        # Check if we've reached the waypoint
+                        current_pos = self.px.get_position()
+                        distance = math.sqrt(
+                            (next_x - current_pos['x']) ** 2 +
+                            (next_y - current_pos['y']) ** 2
+                        )
+
+                        if distance < 10:  # Within 10cm of waypoint
+                            self.current_path_index += 1
+                            break
+
+                        # Check ultrasonic distance and update world map
+                        if self.current_distance < self.min_distance and not self.is_backing_up:
+                            print("Obstacle detected by ultrasonic sensor")
+                            # Update world map with detected obstacle
+                            await self.scan_environment()  # This will update the world map
+                            # Emergency stop and recalculate path
+                            await self.emergency_stop()
+                            break
+
+                        # Check for visual obstacles again while moving
+                        vision_obstacles = self.vision.get_obstacle_info()
+                        if vision_obstacles:
+                            need_stop = False
+                            for obstacle in vision_obstacles:
+                                if obstacle['label'] in ['person', 'cat', 'stop sign']:
+                                    need_stop = True
+                                    break
+                            if need_stop:
+                                self.px.stop()
+                                self.is_moving = False
+                                break
+
+                        await asyncio.sleep(0.1)
+
+                # If we've completed the current path segment, continue to next iteration
+                # to generate new path from current position
 
         except asyncio.CancelledError:
             print("Navigation cancelled")
+            self.px.stop()
             self.is_navigating = False
             raise
+
         finally:
+            self.px.stop()
             self.is_navigating = False
-            self.navigation_target = None
-
-    def _update_vision_detections(self, detected_objects: List[Dict]):
-        """Update map with obstacles detected by vision system"""
-        if not detected_objects:
-            return
-
-        for obj in detected_objects:
-            # Update pathfinder with vision detections
-            self.pathfinder.handle_vision_detection([obj])
-
-            # Calculate relative position from bounding box
-            box = obj['box']  # (xmin, ymin, xmax, ymax)
-            box_center_x = (box[0] + box[2]) / 2
-            box_width = box[2] - box[0]
-
-            # Estimate distance based on box width
-            estimated_distance = 100 * (100 / box_width)  # Simplified example
-
-            # Calculate object position in world coordinates
-            camera_angle_rad = math.radians(self.px.heading)
-            camera_x = (self.px.x + self.CAMERA_OFFSET_X * math.cos(camera_angle_rad))
-            camera_y = (self.px.y + self.CAMERA_OFFSET_X * math.sin(camera_angle_rad))
-
-            obstacle_x = camera_x + estimated_distance * math.cos(camera_angle_rad)
-            obstacle_y = camera_y + estimated_distance * math.sin(camera_angle_rad)
-
-            # Add to world map with appropriate radius based on object type
-            radius = 20.0 if obj['label'] in ['person', 'cat'] else 10.0
-            self.world_map.add_obstacle(
-                x=obstacle_x,
-                y=obstacle_y,
-                radius=radius,
-                confidence=obj['confidence'],
-                label=obj['label']
-            )
 
     async def run(self):
         print("Starting enhanced obstacle avoidance program...")
