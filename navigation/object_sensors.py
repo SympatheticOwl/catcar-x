@@ -295,7 +295,7 @@ class AsyncObstacleAvoidance:
                 print("Obstacle detected! Updating world map...")
                 self.px.stop()
                 await self.scan_environment()
-                # self.world_map.add_padding()
+                self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
 
                 # Recalculate path
                 print("Recalculating path...")
