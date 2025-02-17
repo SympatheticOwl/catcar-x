@@ -231,44 +231,6 @@ class AsyncObstacleAvoidance:
         finally:
             self.current_maneuver = None
 
-    async def navigate_to_point(self, target_x: float, target_y: float):
-        """Start navigation to a target point"""
-        print(f"Starting navigation to ({target_x}, {target_y})")
-
-        # Stop any existing navigation
-        if self.navigation_task:
-            self.pathfinder.stop_navigation()
-            self.navigation_task.cancel()
-            try:
-                await self.navigation_task
-            except asyncio.CancelledError:
-                pass
-
-        # Stop forward movement task if running
-        if self.movement_task:
-            self.movement_task.cancel()
-            try:
-                await self.movement_task
-            except asyncio.CancelledError:
-                pass
-
-        self.navigation_target = (target_x, target_y)
-        self.is_navigating = True
-        self.navigation_task = asyncio.create_task(
-            self.pathfinder.navigate_to_target(target_x, target_y)
-        )
-
-        try:
-            await self.navigation_task
-        except asyncio.CancelledError:
-            print("Navigation cancelled")
-        finally:
-            print("Navigation complete")
-            self.is_navigating = False
-            self.navigation_target = None
-            self.navigation_task = None
-            self.px.stop()
-
     async def forward_movement(self):
         """Modified forward movement to work with pathfinding"""
         while True:
@@ -305,6 +267,46 @@ class AsyncObstacleAvoidance:
 
             await asyncio.sleep(0.1)
 
+    async def navigate_to_point(self, target_x, target_y, speed=30):
+        """Navigate to a target point while accounting for turning radius"""
+        while True:
+
+            # Calculate distance and angle to target
+            dx = target_x - self.px.x
+            dy = target_y - self.px.y
+            print(f'self.x: {self.px.x}, self.y: {self.px.y}')
+            print(f'target.x: {self.px.x}, target.y: {self.px.y}')
+            distance_to_target = math.sqrt(dx ** 2 + dy ** 2)
+
+            # If we're close enough to target, stop
+            if distance_to_target < 5:  # 5cm threshold
+                self.px.stop()
+                return True
+
+            # Calculate target angle in degrees
+            target_angle = math.degrees(math.atan2(dy, dx))
+
+            # Calculate angle difference
+            angle_diff = target_angle - self.px.heading
+            # Normalize to -180 to 180
+            angle_diff = (angle_diff + 180) % 360 - 180
+
+            # If we need to turn more than 45 degrees, stop and turn first
+            if abs(angle_diff) > 45:
+                self.px.stop()
+                await self.px.turn_to_heading(target_angle)
+                continue
+
+            # Calculate steering angle based on angle difference
+            steering_angle = self.px.calculate_steering_angle(angle_diff)
+            self.px.set_dir_servo_angle(steering_angle)
+
+            # Adjust speed based on turn sharpness
+            adjusted_speed = speed * (1 - abs(steering_angle) / (2 * self.px.MAX_STEERING_ANGLE))
+            self.px.forward(adjusted_speed)
+
+            await asyncio.sleep(0.1)
+
     async def run(self):
         print("Starting enhanced obstacle avoidance program...")
         tasks = []
@@ -314,25 +316,17 @@ class AsyncObstacleAvoidance:
             vision_task = asyncio.create_task(self.vision.capture_and_detect())
             ultrasonic_task = asyncio.create_task(self.ultrasonic_monitoring())
             cliff_task = asyncio.create_task(self.cliff_monitoring())
-            self.movement_task = asyncio.create_task(self.forward_movement())
+            navigation_task = asyncio.create_task(self.navigate_to_point(100, 50))
 
             tasks = [
                 pos_track_task,
                 vision_task,
                 ultrasonic_task,
                 cliff_task,
-                self.movement_task
+                navigation_task
             ]
 
-            # Example: Navigate to specific points
-            await self.navigate_to_point(100, 50)  # Navigate 1m forward
-            print("First navigation complete")
-
-            # Resume normal forward movement after navigation
-            self.movement_task = asyncio.create_task(self.forward_movement())
-            tasks.append(self.movement_task)
-
-            await asyncio.gather(*tasks)
+            await asyncio.gather(navigation_task)
 
         except asyncio.CancelledError:
             print("\nShutting down gracefully...")
