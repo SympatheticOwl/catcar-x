@@ -4,7 +4,7 @@ from typing import Tuple, Dict
 from scipy import ndimage
 
 class WorldMap:
-    def __init__(self, map_size: int = 200, resolution: float = 10.0):
+    def __init__(self, map_size: int = 200, resolution: float = 5.0):
         self.resolution = resolution
         self.grid_size = int(map_size / resolution)
         self.grid = np.zeros((self.grid_size, self.grid_size), dtype=np.uint8)
