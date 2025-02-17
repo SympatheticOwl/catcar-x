@@ -294,7 +294,7 @@ class AsyncObstacleAvoidance:
 
             while True:
                 # Move towards point
-                self.px.forward(self.px.speed)
+                self.px.forward(self.speed)
 
                 # Check for obstacles while moving
                 await self.px.scan_environment()
