@@ -11,140 +11,91 @@ from picarx_wrapper import PicarXWrapper
 from world_map import WorldMap
 
 
-@dataclass
-class Node:
-    x: int  # grid coordinates
-    y: int
-    g_cost: float = float('inf')  # cost from start
-    h_cost: float = float('inf')  # heuristic cost to goal
-    parent: 'Node' = None
-
-    @property
-    def f_cost(self) -> float:
-        return self.g_cost + self.h_cost
-
-    def __eq__(self, other):
-        if not isinstance(other, Node):
-            return False
-        return self.x == other.x and self.y == other.y
-
-    def __hash__(self):
-        return hash((self.x, self.y))
-
-
 class Pathfinder:
-    def __init__(self, world_map: WorldMap, picar: PicarXWrapper):
+    def __init__(self, world_map, picar):
         self.world_map = world_map
         self.picar = picar
-        self.current_path = []
-        self.current_path_index = 0
+        self.grid_size = world_map.grid_size
+        self.resolution = world_map.resolution
 
-        # Movement directions (8-directional)
-        self.directions = [
-            (0, 1),  # N
-            (1, 1),  # NE
-            (1, 0),  # E
-            (1, -1),  # SE
-            (0, -1),  # S
-            (-1, -1),  # SW
-            (-1, 0),  # W
-            (-1, 1)  # NW
-        ]
+    def heuristic(self, a: Tuple[int, int], b: Tuple[int, int]) -> float:
+        """Manhattan distance heuristic"""
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
-    def heuristic(self, node: Node, goal: Node) -> float:
-        """Calculate heuristic cost using diagonal distance"""
-        dx = abs(node.x - goal.x)
-        dy = abs(node.y - goal.y)
-        return math.sqrt(dx * dx + dy * dy)
-
-    def get_neighbors(self, node: Node) -> List[Node]:
-        """Get valid neighboring nodes"""
+    def get_neighbors(self, pos: Tuple[int, int]) -> List[Tuple[int, int]]:
+        """Get valid neighboring grid cells"""
+        x, y = pos
         neighbors = []
 
-        for dx, dy in self.directions:
-            new_x = node.x + dx
-            new_y = node.y + dy
+        # Check all 8 directions
+        for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0), (1, 1), (1, -1), (-1, 1), (-1, -1)]:
+            new_x, new_y = x + dx, y + dy
 
             # Check bounds
-            if (0 <= new_x < self.world_map.grid_size and
-                    0 <= new_y < self.world_map.grid_size):
-
+            if 0 <= new_x < self.grid_size and 0 <= new_y < self.grid_size:
                 # Check if cell is obstacle-free
                 if self.world_map.grid[new_y, new_x] == 0:
-                    neighbor = Node(new_x, new_y)
-
-                    # Calculate movement cost (diagonal movement costs more)
-                    if dx == 0 or dy == 0:
-                        movement_cost = 1.0
-                    else:
-                        movement_cost = 1.4  # sqrt(2)
-
-                    neighbor.g_cost = node.g_cost + movement_cost
-                    neighbors.append(neighbor)
+                    neighbors.append((new_x, new_y))
 
         return neighbors
 
-    def find_path(self, start_x: float, start_y: float,
-                  goal_x: float, goal_y: float) -> List[Tuple[float, float]]:
+    def find_path(self, start_pos: Tuple[float, float], goal_pos: Tuple[float, float]) -> List[Tuple[float, float]]:
         """Find path from start to goal using A* algorithm"""
         # Convert world coordinates to grid coordinates
-        start_grid_x, start_grid_y = self.world_map.world_to_grid(start_x, start_y)
-        goal_grid_x, goal_grid_y = self.world_map.world_to_grid(goal_x, goal_y)
+        start_grid = self.world_map.world_to_grid(start_pos[0], start_pos[1])
+        goal_grid = self.world_map.world_to_grid(goal_pos[0], goal_pos[1])
 
-        start_node = Node(start_grid_x, start_grid_y, g_cost=0)
-        goal_node = Node(goal_grid_x, goal_grid_y)
+        # Initialize data structures
+        frontier = []
+        heapq.heappush(frontier, (0, start_grid))
+        came_from = {start_grid: None}
+        cost_so_far = {start_grid: 0}
 
-        # Initialize open and closed sets
-        open_set = {start_node}
-        closed_set = set()
+        while frontier:
+            current = heapq.heappop(frontier)[1]
 
-        # Calculate initial heuristic
-        start_node.h_cost = self.heuristic(start_node, goal_node)
+            if current == goal_grid:
+                break
 
-        while open_set:
-            # Get node with lowest f_cost
-            current = min(open_set, key=lambda n: n.f_cost)
+            for next_pos in self.get_neighbors(current):
+                # Calculate new cost (diagonal movement costs more)
+                dx = abs(next_pos[0] - current[0])
+                dy = abs(next_pos[1] - current[1])
+                movement_cost = 1.4 if dx + dy == 2 else 1.0
+                new_cost = cost_so_far[current] + movement_cost
 
-            # Check if we've reached the goal
-            if current.x == goal_node.x and current.y == goal_node.y:
-                return self._reconstruct_path(current)
+                if next_pos not in cost_so_far or new_cost < cost_so_far[next_pos]:
+                    cost_so_far[next_pos] = new_cost
+                    priority = new_cost + self.heuristic(goal_grid, next_pos)
+                    heapq.heappush(frontier, (priority, next_pos))
+                    came_from[next_pos] = current
 
-            open_set.remove(current)
-            closed_set.add(current)
+        # Reconstruct path
+        if goal_grid not in came_from:
+            return []  # No path found
 
-            # Check neighbors
-            for neighbor in self.get_neighbors(current):
-                if neighbor in closed_set:
-                    continue
-
-                # Calculate heuristic if not already in open set
-                if neighbor not in open_set:
-                    neighbor.h_cost = self.heuristic(neighbor, goal_node)
-                    neighbor.parent = current
-                    open_set.add(neighbor)
-                else:
-                    # Check if this path is better than previous
-                    if neighbor.g_cost > current.g_cost + 1:
-                        neighbor.g_cost = current.g_cost + 1
-                        neighbor.parent = current
-
-        return []  # No path found
-
-    def _reconstruct_path(self, goal_node: Node) -> List[Tuple[float, float]]:
-        """Reconstruct path from goal node back to start"""
         path = []
-        current = goal_node
-
+        current = goal_grid
         while current is not None:
             # Convert grid coordinates back to world coordinates
-            world_x, world_y = self.world_map.grid_to_world(current.x, current.y)
+            world_x, world_y = self.world_map.grid_to_world(current[0], current[1])
             path.append((world_x, world_y))
-            current = current.parent
+            current = came_from[current]
 
-        return list(reversed(path))
+        path.reverse()
+        return path
 
-    def is_near_target(self, current_x: float, current_y: float,
-                       target_x: float, target_y: float) -> bool:
-        """Check if current position is within one grid space of target"""
-        distance = math.sqrt((current_x - target_x) ** 2 + (current_y - target_y) ** 2)
-        return distance <= self.world_map.resolution
+    def is_path_clear(self, path: List[Tuple[float, float]]) -> bool:
+        """Check if path is clear of obstacles"""
+        for x, y in path:
+            grid_x, grid_y = self.world_map.world_to_grid(x, y)
+            # Check surrounding cells (1 grid space)
+            for dx in [-1, 0, 1]:
+                for dy in [-1, 0, 1]:
+                    check_x = grid_x + dx
+                    check_y = grid_y + dy
+                    if (0 <= check_x < self.grid_size and
+                            0 <= check_y < self.grid_size and
+                            self.world_map.grid[check_y, check_x] != 0):
+                        return False
+        return True
