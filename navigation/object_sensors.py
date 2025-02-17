@@ -248,6 +248,7 @@ class AsyncObstacleAvoidance:
                                 self.px.forward(0)
                                 self.px.set_dir_servo_angle(0)
                                 await asyncio.sleep(0.5)
+                                break
                             else:
                                 self.emergency_stop_flag = False
 
