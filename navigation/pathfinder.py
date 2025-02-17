@@ -12,15 +12,69 @@ from world_map import WorldMap
 
 
 class Pathfinder:
-    def __init__(self, world_map: WorldMap, picarx: PicarXWrapper):
+    def __init__(self, world_map, picarx):
         self.world_map = world_map
         self.px = picarx
 
-        # Directions for 8-directional movement (N, NE, E, SE, S, SW, W, NW)
+        # Directions for 8-directional movement in degrees (N, NE, E, SE, S, SW, W, NW)
         self.directions = [
-            (0, 1), (1, 1), (1, 0), (1, -1),
-            (0, -1), (-1, -1), (-1, 0), (-1, 1)
+            (0, 1, 0),  # North: 0 degrees
+            (1, 1, 45),  # Northeast: 45 degrees
+            (1, 0, 90),  # East: 90 degrees
+            (1, -1, 135),  # Southeast: 135 degrees
+            (0, -1, 180),  # South: 180 degrees
+            (-1, -1, 225),  # Southwest: 225 degrees
+            (-1, 0, 270),  # West: 270 degrees
+            (-1, 1, 315),  # Northwest: 315 degrees
         ]
+
+        # Turn parameters from PicarXWrapper
+        self.TURN_SPEED = 30
+        self.DIAGONAL_TURN_TIME = 1.25  # Time for 45-degree turn
+        self.FULL_TURN_TIME = 2.3  # Time for 90-degree turn
+
+    async def execute_turn(self, target_heading: float):
+        """Execute a turn to reach target heading"""
+        current_heading = self.px.heading % 360
+        angle_diff = target_heading - current_heading
+        # Normalize to -180 to 180
+        angle_diff = (angle_diff + 180) % 360 - 180
+
+        # Calculate turn time based on angle
+        turn_time = abs(angle_diff / 90.0) * self.FULL_TURN_TIME
+
+        # Set steering direction
+        steering_angle = 30 if angle_diff > 0 else -30
+        self.px.set_dir_servo_angle(steering_angle)
+
+        # Execute turn
+        if angle_diff > 0:
+            self.px.forward(self.TURN_SPEED)
+        else:
+            self.px.backward(self.TURN_SPEED)
+
+        await asyncio.sleep(turn_time)
+
+        # Stop and straighten wheels
+        self.px.stop()
+        self.px.set_dir_servo_angle(0)
+        await asyncio.sleep(0.1)
+
+    async def move_one_grid(self, direction_idx: int):
+        """Move one grid space in the specified direction"""
+        dx, dy, heading = self.directions[direction_idx]
+
+        # First turn to the correct heading
+        await self.execute_turn(heading)
+
+        # Calculate movement time based on grid resolution
+        # Distance = grid_resolution, speed = 30 cm/s
+        movement_time = self.world_map.resolution / 30.0
+
+        # Move forward one grid space
+        self.px.forward(30)
+        await asyncio.sleep(movement_time)
+        self.px.stop()
 
     def _heuristic(self, a: Tuple[int, int], b: Tuple[int, int]) -> float:
         """Calculate heuristic (diagonal distance) between points"""
@@ -28,10 +82,10 @@ class Pathfinder:
         dy = abs(a[1] - b[1])
         return max(dx, dy) + (math.sqrt(2) - 1) * min(dx, dy)
 
-    def _get_neighbors(self, pos: Tuple[int, int]) -> List[Tuple[int, int]]:
-        """Get valid neighboring grid positions"""
+    def _get_neighbors(self, pos: Tuple[int, int]) -> List[Tuple[int, int, int]]:
+        """Get valid neighboring grid positions with direction index"""
         neighbors = []
-        for dx, dy in self.directions:
+        for i, (dx, dy, _) in enumerate(self.directions):
             new_x, new_y = pos[0] + dx, pos[1] + dy
 
             # Check grid bounds
@@ -40,13 +94,13 @@ class Pathfinder:
 
                 # Check if position is obstacle-free
                 if self.world_map.grid[new_y, new_x] == 0:
-                    neighbors.append((new_x, new_y))
+                    neighbors.append((new_x, new_y, i))
 
         return neighbors
 
     def find_path(self, start_x: float, start_y: float,
-                  target_x: float, target_y: float) -> List[Tuple[float, float]]:
-        """Find path from start to target using A* algorithm"""
+                  target_x: float, target_y: float) -> List[Tuple[int, int, int]]:
+        """Find path from start to target using A* algorithm, returns grid positions and directions"""
         # Convert world coordinates to grid coordinates
         start_grid = self.world_map.world_to_grid(start_x, start_y)
         target_grid = self.world_map.world_to_grid(target_x, target_y)
@@ -64,18 +118,21 @@ class Pathfinder:
                 break
 
             for next_pos in self._get_neighbors(current):
+                new_x, new_y, dir_idx = next_pos
+
                 # Calculate movement cost (diagonal moves cost more)
-                dx = abs(next_pos[0] - current[0])
-                dy = abs(next_pos[1] - current[1])
+                dx = abs(new_x - current[0])
+                dy = abs(new_y - current[1])
                 move_cost = math.sqrt(2) if dx + dy == 2 else 1
 
                 new_cost = cost_so_far[current] + move_cost
+                next_pos_grid = (new_x, new_y)
 
-                if next_pos not in cost_so_far or new_cost < cost_so_far[next_pos]:
-                    cost_so_far[next_pos] = new_cost
-                    priority = new_cost + self._heuristic(next_pos, target_grid)
-                    heapq.heappush(frontier, (priority, next_pos))
-                    came_from[next_pos] = current
+                if next_pos_grid not in cost_so_far or new_cost < cost_so_far[next_pos_grid]:
+                    cost_so_far[next_pos_grid] = new_cost
+                    priority = new_cost + self._heuristic(next_pos_grid, target_grid)
+                    heapq.heappush(frontier, (priority, next_pos_grid))
+                    came_from[next_pos_grid] = (current, dir_idx)
 
         # Reconstruct path
         if target_grid not in came_from:
@@ -84,77 +141,56 @@ class Pathfinder:
         path = []
         current = target_grid
         while current is not None:
-            # Convert grid coordinates back to world coordinates
-            world_x, world_y = self.world_map.grid_to_world(current[0], current[1])
-            path.append((world_x, world_y))
-            current = came_from[current]
+            if current == start_grid:
+                break
+            prev_pos, dir_idx = came_from[current]
+            path.append((current[0], current[1], dir_idx))
+            current = prev_pos
 
         path.reverse()
         return path
 
 
 async def navigate_to_target(self, target_x: float, target_y: float):
-    """Navigate to target position using A* pathfinding"""
+    """Navigate to target position using grid-based movement"""
     print(f"Starting navigation to target ({target_x}, {target_y})")
 
     while True:
         current_pos = self.px.get_position()
-        current_x, current_y = current_pos['x'], current_pos['y']
 
         # Find path to target
-        path = self.find_path(current_x, current_y, target_x, target_y)
+        path = self.find_path(current_pos['x'], current_pos['y'], target_x, target_y)
 
         if not path:
             print("No valid path found to target")
             return False
 
-        print(f"Found path with {len(path)} waypoints")
+        print(f"Found path with {len(path)} grid moves")
 
-        # Follow path
-        for waypoint_x, waypoint_y in path:
-            # Navigate to each waypoint
-            while True:
-                current_pos = self.px.get_position()
-                distance_to_waypoint = math.sqrt(
-                    (waypoint_x - current_pos['x']) ** 2 +
-                    (waypoint_y - current_pos['y']) ** 2
-                )
-
-                # Check if we've reached the waypoint
-                if distance_to_waypoint < 5:  # 5cm threshold
-                    break
-
-                # Calculate angle to waypoint
-                dx = waypoint_x - current_pos['x']
-                dy = waypoint_y - current_pos['y']
-                target_heading = math.degrees(math.atan2(dy, dx)) % 360
-
-                # Calculate angle difference
-                angle_diff = target_heading - current_pos['heading']
-                angle_diff = (angle_diff + 180) % 360 - 180
-
-                # Set steering angle
-                steering_angle = self.px.calculate_steering_angle(angle_diff)
-                self.px.set_dir_servo_angle(steering_angle)
-
-                # Move forward if ultrasonic reading is clear
-                if self.px.current_distance >= self.px.min_distance:
-                    self.px.forward(30)  # Standard speed
-                else:
-                    # Obstacle detected - stop and scan
-                    print("Obstacle detected, stopping to scan...")
-                    self.px.stop()
-
-                    # Scan environment
-                    await self.scan_environment()
-
-                    # Recalculate path from current position
-                    break  # Exit waypoint loop to recalculate full path
-
-                await asyncio.sleep(0.1)
-
-            # If we broke out of the waypoint loop due to obstacle, break path loop too
+        # Follow path grid by grid
+        for grid_x, grid_y, direction_idx in path:
+            # Check for obstacles before each move
             if self.px.current_distance < self.px.min_distance:
+                print("Obstacle detected, stopping to scan...")
+                self.px.stop()
+
+                # Scan environment and update map
+                await self.scan_environment()
+                break  # Recalculate path
+
+            # Execute grid movement
+            await self.move_one_grid(direction_idx)
+
+            # Verify position after movement
+            current_pos = self.px.get_position()
+            world_x, world_y = self.world_map.grid_to_world(grid_x, grid_y)
+            distance_to_target = math.sqrt(
+                (world_x - current_pos['x']) ** 2 +
+                (world_y - current_pos['y']) ** 2
+            )
+
+            if distance_to_target > self.world_map.resolution:
+                print("Position error too large, recalculating path...")
                 break
 
         # Check if we've reached the final target
@@ -164,10 +200,8 @@ async def navigate_to_target(self, target_x: float, target_y: float):
             (target_y - current_pos['y']) ** 2
         )
 
-        if distance_to_target < 5:  # 5cm threshold
+        if distance_to_target < self.world_map.resolution / 2:
             print("Reached target position!")
-            self.px.stop()
             return True
 
-        # If we're here, we hit an obstacle and need to recalculate path
         await asyncio.sleep(0.1)
