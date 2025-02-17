@@ -304,11 +304,13 @@ class AsyncObstacleAvoidance:
         return True  # Path completed successfully
 
     async def navigate_to_target(self, target_x: float, target_y: float):
-        """Navigate to target coordinates using A* pathfinding"""
+        """Navigate to target coordinates using A* pathfinding with obstacle avoidance"""
         print(f"\nNavigating to target: ({target_x}, {target_y})")
         self.is_navigating = True
+        retry_count = 0
+        MAX_RETRIES = 5
 
-        while self.is_navigating:
+        while self.is_navigating and retry_count < MAX_RETRIES:
             # Get current position
             current_pos = self.px.get_position()
             current_x = current_pos['x']
@@ -326,36 +328,52 @@ class AsyncObstacleAvoidance:
                 self.px.forward(0)
                 return True
 
+            # Initial environment scan if this is first attempt or after obstacle
+            if retry_count == 0 or self.current_path is None:
+                print("Performing initial environment scan...")
+                await self.pathfinder.scan_environment()
+
             # Find path to target
+            print("Calculating path to target...")
             path = await self.pathfinder.find_path(
                 current_x, current_y,
                 target_x, target_y
             )
 
             if not path:
-                print("No path found to target!")
-                self.is_navigating = False
-                return False
+                print(f"No path found to target! (Attempt {retry_count + 1}/{MAX_RETRIES})")
+                retry_count += 1
+                await asyncio.sleep(0.5)
+                continue
 
-            print(f"Found path: {path}")
+            print(f"Found path with {len(path)} waypoints: {path}")
             self.current_path = path
             self.current_path_index = 0
 
             # Execute path
-            success = await self.execute_path(path)
+            success = await self.pathfinder.execute_path(path)
 
             if not success:
-                print("Path execution interrupted - scanning environment...")
-                # Scan environment for new obstacles
-                await self.scan_environment()
-                # Add padding to detected obstacles
-                self.world_map.add_padding()
-                # Path will be recalculated on next loop iteration
+                print("Path execution interrupted by obstacle!")
+                self.px.forward(0)  # Ensure we're stopped
+
+                # Scan for new obstacles
+                print("Scanning for obstacles...")
+                await self.pathfinder.scan_environment()
+
+                # Increment retry counter
+                retry_count += 1
+                print(f"Retrying navigation (Attempt {retry_count}/{MAX_RETRIES})")
+
+                # Small delay before retrying
                 await asyncio.sleep(0.5)
             else:
                 self.is_navigating = False
                 return True
 
+        # If we get here, we've exceeded max retries
+        print("Failed to reach target after maximum retry attempts!")
+        self.is_navigating = False
         return False
 
     async def run(self):
