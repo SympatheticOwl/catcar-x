@@ -170,24 +170,14 @@ class AsyncObstacleAvoidance:
         self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
 
     def find_best_direction(self, scan_data):
-        """Analyze scan data to find the best direction to move, accounting for padded obstacles"""
+        """Analyze scan data to find the best direction to move"""
         max_distance = 0
         best_angle = 0
 
-        # Consider the padded map when finding the best direction
         for angle, distance in scan_data:
-            # Convert the measured point to map coordinates
-            point = self._polar_to_cartesian(angle, distance)
-            map_x = int(point[0] + self.map_size // 2)
-            map_y = int(point[1] + self.map_size // 2)
-
-            # Check if the point and its surrounding area (padding) are clear
-            if (0 <= map_x < self.map_size and
-                    0 <= map_y < self.map_size and
-                    not self.map[map_y, map_x]):  # Check padded map
-                if distance > max_distance:
-                    max_distance = distance
-                    best_angle = angle
+            if distance > max_distance:
+                max_distance = distance
+                best_angle = angle
 
         return best_angle, max_distance
 
