@@ -299,25 +299,24 @@ class AsyncObstacleAvoidance:
                 await self.scan_environment()
                 self.world_map.add_padding()
 
-                # Find an escape route
-                print("Finding escape route...")
+                # Find best direction to turn
+                print("Finding best direction to escape obstacle...")
+                best_angle, max_distance = self.find_best_direction()
+                print(f"Best escape direction: {best_angle}° (clear path: {max_distance:.1f}cm)")
 
-                # First back up a bit to give more room for maneuvering
-                self.px.backward(self.speed)
-                await asyncio.sleep(self.backup_time)
-                self.px.stop()
+                # Turn to the best direction
+                await self.px.turn_to_heading(self.px.heading + best_angle)
 
-                # Update current position after backup
+                # Update current position
                 current_pos = self.px.get_position()
                 current_x, current_y = current_pos['x'], current_pos['y']
 
-                # Recalculate path with increased padding
-                self.world_map.padding_size = 2  # Temporarily increase padding
+                # Recalculate path from new heading
+                print("Recalculating path from new heading...")
                 path = await self.pathfinder.update_path(
                     current_x, current_y,
                     target_x, target_y
                 )
-                self.world_map.padding_size = 1  # Reset padding
 
                 if not path:
                     print("No valid path found! Trying to find alternate route...")
