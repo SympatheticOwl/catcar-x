@@ -298,11 +298,7 @@ class AsyncObstacleAvoidance:
                 self.is_moving = False
                 self.px.forward(0)
                 await asyncio.sleep(0.5)
-                await self.scan_environment()
-
-                best_angle, max_distance = self.find_best_direction()
-                print(f"Turning to {best_angle}° (clearest path: {max_distance:.1f}cm)")
-                self.px.set_dir_servo_angle(best_angle)
+                await self.evasive_maneuver()
                 print("current_maneuver done...")
                 # Recalculate path
                 print("Recalculating path...")
