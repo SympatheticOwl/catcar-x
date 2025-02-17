@@ -263,14 +263,61 @@ class AsyncObstacleAvoidance:
                     self.is_navigating = False
                     return True
 
+                # Check for obstacles and their types
+                obstacle_detected = self.current_distance < self.min_distance
+                person_or_cat_detected = False
+                stop_sign_detected = False
+
+                if obstacle_detected and self.vision_enabled:
+                    # Get latest vision detection results
+                    detections = self.vision.get_latest_detections()
+                    if detections:
+                        for detection in detections:
+                            if detection['label'] in ['person', 'cat']:
+                                person_or_cat_detected = True
+                                print(f"Detected {detection['label']} - waiting for path to clear")
+                                break
+                            elif detection['label'] == 'stop sign':
+                                stop_sign_detected = True
+                                print("Stop sign detected")
+                                break
+
+                # Handle different obstacle types
+                if obstacle_detected:
+                    if person_or_cat_detected:
+                        # Stop and wait for dynamic obstacle to clear
+                        print("Waiting for person/cat to move...")
+                        self.px.stop()
+                        self.is_moving = False
+                        await asyncio.sleep(0.5)  # Check again in 0.5 seconds
+                        continue
+
+                    elif stop_sign_detected:
+                        # Pull up to stop sign and wait
+                        print("Approaching stop sign...")
+                        while self.current_distance > 40:  # One grid space is ~40cm
+                            self.px.forward(self.speed * 0.5)  # Approach slowly
+                            await asyncio.sleep(0.1)
+
+                        print("Stopped at stop sign - waiting 3 seconds")
+                        self.px.stop()
+                        self.is_moving = False
+                        await asyncio.sleep(3)
+                        print("Resuming navigation")
+
+                    else:
+                        # Other obstacle - needs path recalculation
+                        print(f"Static obstacle detected at {self.current_distance:.1f} cm - replanning required")
+                        need_replan = True
+
                 # Check if we need to replan path
                 need_replan = False
 
                 if not self.current_path:
                     print("No current path - planning required")
                     need_replan = True
-                elif self.current_distance < self.min_distance:
-                    print(f"Obstacle detected at {self.current_distance:.1f} cm - replanning required")
+                elif obstacle_detected and not (person_or_cat_detected or stop_sign_detected):
+                    print("Static obstacle detected - replanning required")
                     need_replan = True
                 elif not self.pathfinder.is_path_clear(self.current_path):
                     print("Current path blocked - replanning required")
@@ -280,10 +327,9 @@ class AsyncObstacleAvoidance:
                 if need_replan:
                     print("\nPlanning new path...")
                     # Scan environment if obstacle detected
-                    if self.current_distance < self.min_distance:
-                        print("Scanning environment...")
-                        await self.scan_environment()
-                        self.world_map.add_padding()
+                    print("Scanning environment...")
+                    await self.scan_environment()
+                    self.world_map.add_padding()
 
                     # Find new path
                     self.current_path = self.pathfinder.find_path(
@@ -302,8 +348,8 @@ class AsyncObstacleAvoidance:
                     self.current_path_index = 0
                     print(f"New path created with {len(self.current_path)} waypoints")
 
-                # Follow current path
-                if self.current_path_index < len(self.current_path):
+                # Follow current path if no dynamic obstacles
+                if not (person_or_cat_detected) and self.current_path_index < len(self.current_path):
                     next_x, next_y = self.current_path[self.current_path_index]
                     print(f"\nMoving to waypoint {self.current_path_index + 1}/{len(self.current_path)}: " +
                           f"({next_x:.1f}, {next_y:.1f})")
