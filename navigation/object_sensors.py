@@ -84,7 +84,6 @@ class AsyncObstacleAvoidance:
                 distances.append(dist)
             await asyncio.sleep(0.01)
 
-        print(f'distances: {distances}')
         if distances:
             self._update_ultrasonic_detection(sum(distances) / len(distances))
         return distances
@@ -96,7 +95,8 @@ class AsyncObstacleAvoidance:
         for angle in range(start_angle, end_angle + 1, self.scan_step):
             self.px.set_cam_pan_angle(angle)
             await asyncio.sleep(0.05)
-            await self.scan_avg()
+            distance = await self.scan_avg()
+            print(f'Environment Scan Distance: {distance}')
 
         self.px.set_cam_pan_angle(0)
         return scan_data
@@ -113,8 +113,6 @@ class AsyncObstacleAvoidance:
             distances = await self.scan_avg()
             if distances:
                 self.current_distance = sum(distances) / len(distances)
-
-                print(f"Distance: {self.current_distance:.1f} cm")
 
                 # emergency stop if too close during forward movement only
                 if (self.current_distance < self.min_distance and

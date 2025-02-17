@@ -4,9 +4,9 @@ from typing import Tuple, Dict
 from scipy import ndimage
 
 class WorldMap:
-    def __init__(self, map_size: int = 400, resolution: float = 1.0):
-        self.resolution = resolution
-        self.grid_size = int(map_size / resolution)
+    def __init__(self, map_size: int = 400, resolution: float = 5.0):
+        self.resolution = resolution  # 5cm per grid cell
+        self.grid_size = int(map_size / resolution)  # 80x80 grid
         self.grid = np.zeros((self.grid_size, self.grid_size), dtype=np.uint8)
 
         # Set origin to center of grid
@@ -16,7 +16,8 @@ class WorldMap:
         self.obstacles = {}
         self.obstacle_id_counter = 0
 
-        self.padding_size = 2
+        # Reduce padding size for finer resolution
+        self.padding_size = 1  # Reduced from 2 to 1 since grid cells are smaller
         self.padding_structure = np.ones((2, 2))
 
     def world_to_grid(self, x: float, y: float) -> Tuple[int, int]:
