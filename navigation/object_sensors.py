@@ -12,7 +12,6 @@ from vision_system import VisionSystem
 
 class AsyncObstacleAvoidance:
     def __init__(self):
-        # World mapping
         self.px = PicarXWrapper()
         self.world_map = WorldMap()  # 4m x 4m map, 1cm resolution
         self.pathfinder = Pathfinder(self.world_map, self.px)
@@ -36,7 +35,7 @@ class AsyncObstacleAvoidance:
         self.is_moving = False
         self.current_maneuver = None
         self.emergency_stop_flag = False
-        self.is_backing_up = False  # since this is async we don't want to interrupt evasive backup maneuvers while obejcts are still too close
+        self.is_backing_up = False
         self.is_cliff = False
 
         # vision
@@ -44,13 +43,11 @@ class AsyncObstacleAvoidance:
         self.vision_enabled = True
         self.vision_clear = True
 
-        # scanning parameters
-        self.scan_range = (-60, 60)
-        self.scan_step = 5
-
-        self.pathfinder = Pathfinder(self.world_map, self.px)
+        # Navigation state
         self.navigation_target = None
         self.navigation_task = None
+        self.movement_task = None
+        self.is_navigating = False
 
     def _update_ultrasonic_detection(self, distance: float):
         """Update map with obstacle detected by ultrasonic sensor"""
@@ -236,6 +233,9 @@ class AsyncObstacleAvoidance:
 
     async def navigate_to_point(self, target_x: float, target_y: float):
         """Start navigation to a target point"""
+        print(f"Starting navigation to ({target_x}, {target_y})")
+
+        # Stop any existing navigation
         if self.navigation_task:
             self.pathfinder.stop_navigation()
             self.navigation_task.cancel()
@@ -244,64 +244,96 @@ class AsyncObstacleAvoidance:
             except asyncio.CancelledError:
                 pass
 
+        # Stop forward movement task if running
+        if self.movement_task:
+            self.movement_task.cancel()
+            try:
+                await self.movement_task
+            except asyncio.CancelledError:
+                pass
+
         self.navigation_target = (target_x, target_y)
+        self.is_navigating = True
         self.navigation_task = asyncio.create_task(
             self.pathfinder.navigate_to_target(target_x, target_y)
         )
+
+        try:
+            await self.navigation_task
+        except asyncio.CancelledError:
+            print("Navigation cancelled")
+        finally:
+            print("Navigation complete")
+            self.is_navigating = False
+            self.navigation_target = None
+            self.navigation_task = None
+            self.px.stop()
 
     async def forward_movement(self):
         """Modified forward movement to work with pathfinding"""
         while True:
             if not self.emergency_stop_flag and not self.current_maneuver:
-                # Check both ultrasonic and vision systems
-                if self.vision_enabled:
-                    objects = self.vision.get_obstacle_info()
-                    if objects:
-                        for obj in objects:
-                            print(f"Vision system detected: {obj['label']}")
-                            if obj['label'] == "stop sign":
-                                print("STOP!!!!")
-                                self.vision_clear = False
+                # Only handle forward movement when not navigating to a point
+                if not self.is_navigating:
+                    # Check both ultrasonic and vision systems
+                    if self.vision_enabled:
+                        objects = self.vision.get_obstacle_info()
+                        if objects:
+                            for obj in objects:
+                                print(f"Vision system detected: {obj['label']}")
+                                if obj['label'] == "stop sign":
+                                    print("STOP!!!!")
+                                    self.vision_clear = False
 
-                # Check for obstacles
-                if self.current_distance < self.min_distance or self.is_cliff:
-                    if self.pathfinder.is_navigating:
-                        print("Obstacle detected during navigation, replanning...")
-                        # Update map with new obstacle
-                        await self.scan_environment()
-                        self.world_map.add_padding()
-
-                        # Recalculate path
-                        if self.navigation_target:
-                            await self.navigate_to_point(*self.navigation_target)
+                    # Move forward if clear
+                    if self.current_distance >= self.min_distance and not self.is_cliff:
+                        if not self.is_moving:
+                            print("Moving forward...")
+                            self.is_moving = True
+                            self.px.forward(self.speed)
                     else:
-                        # Regular obstacle avoidance behavior
                         if self.is_moving:
+                            if self.is_cliff:
+                                print("Cliff detected!")
+                            elif not self.vision_clear:
+                                print("Vision system detected obstacle!")
+                            else:
+                                print(f"Ultrasonic detected obstacle at {self.current_distance:.1f}cm")
                             self.is_moving = False
                             self.px.forward(0)
                             self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
 
             await asyncio.sleep(0.1)
 
-
-
     async def run(self):
         print("Starting enhanced obstacle avoidance program...")
         tasks = []
         try:
-            # Add vision task to existing tasks
+            # Create all tasks
             pos_track_task = asyncio.create_task(self.px.continuous_position_tracking())
             vision_task = asyncio.create_task(self.vision.capture_and_detect())
             ultrasonic_task = asyncio.create_task(self.ultrasonic_monitoring())
             cliff_task = asyncio.create_task(self.cliff_monitoring())
-            navigation_task = asyncio.create_task(self.forward_movement())
-            # self.navigation_task = asyncio.create_task(self.navigate_to_point(100, 50))
+            self.movement_task = asyncio.create_task(self.forward_movement())
 
-            tasks = [pos_track_task, vision_task, ultrasonic_task, cliff_task, navigation_task]
+            tasks = [
+                pos_track_task,
+                vision_task,
+                ultrasonic_task,
+                cliff_task,
+                self.movement_task
+            ]
 
-            await self.navigate_to_point(100, 50)  # Navigate to point 1m ahead
-            for task in tasks:
-                task.cancel()
+            # Example: Navigate to specific points
+            await self.navigate_to_point(100, 50)  # Navigate 1m forward
+            print("First navigation complete")
+
+            # Resume normal forward movement after navigation
+            self.movement_task = asyncio.create_task(self.forward_movement())
+            tasks.append(self.movement_task)
+
+            await asyncio.gather(*tasks)
+
         except asyncio.CancelledError:
             print("\nShutting down gracefully...")
         finally:
