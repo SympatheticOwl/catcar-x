@@ -267,7 +267,6 @@ class AsyncObstacleAvoidance:
         while True:
             current_pos = self.px.get_position()
             current_x, current_y = current_pos['x'], current_pos['y']
-            print(f'current_pos: {current_pos}')
 
             # Check if we've reached the target
             distance_to_target = math.sqrt(
@@ -286,7 +285,6 @@ class AsyncObstacleAvoidance:
                     current_x, current_y,
                     target_x, target_y
                 )
-                print(f'initial path: {path}')
                 if not path:
                     print("No valid path found!")
                     self.px.stop()
@@ -294,23 +292,47 @@ class AsyncObstacleAvoidance:
 
             # Scan environment and update world map
             if self.current_distance < self.min_distance or not self.vision_clear:
-                print("Obstacle detected! Updating world map...")
-                self.is_moving = False
-                self.px.forward(0)
-                await asyncio.sleep(0.5)
-                self.is_moving = False
-                self.px.forward(0)
-                self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
-                await self.current_maneuver
-                await asyncio.sleep(0.5)
-                print("current_maneuver done...")
-                # Recalculate path
-                print("Recalculating path...")
+                print("Obstacle detected! Stopping and scanning environment...")
+                self.px.stop()
+
+                # Perform a complete environment scan
+                await self.scan_environment()
+                self.world_map.add_padding()
+
+                # Find an escape route
+                print("Finding escape route...")
+
+                # First back up a bit to give more room for maneuvering
+                self.px.backward(self.speed)
+                await asyncio.sleep(self.backup_time)
+                self.px.stop()
+
+                # Update current position after backup
+                current_pos = self.px.get_position()
+                current_x, current_y = current_pos['x'], current_pos['y']
+
+                # Recalculate path with increased padding
+                self.world_map.padding_size = 2  # Temporarily increase padding
                 path = self.pathfinder.update_path(
                     current_x, current_y,
                     target_x, target_y
                 )
-                print(f'new path: {path}')
+                self.world_map.padding_size = 1  # Reset padding
+
+                if not path:
+                    print("No valid path found! Trying to find alternate route...")
+                    # Try to find a path to a point slightly offset from the target
+                    for offset in [(30, 0), (-30, 0), (0, 30), (0, -30)]:
+                        alt_target_x = target_x + offset[0]
+                        alt_target_y = target_y + offset[1]
+                        path = self.pathfinder.update_path(
+                            current_x, current_y,
+                            alt_target_x, alt_target_y
+                        )
+                        if path:
+                            print("Found alternate route!")
+                            break
+
                 if not path:
                     print("No valid path found after obstacle detection!")
                     return False

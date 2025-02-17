@@ -1,10 +1,7 @@
-import heapq
-import math
-import time
-
 import numpy as np
-from typing import List, Tuple, Dict, Set
-import asyncio
+from typing import List, Tuple, Set, Dict
+import math
+import heapq
 
 
 class Pathfinder:
@@ -32,20 +29,32 @@ class Pathfinder:
         return max(dx, dy) + (math.sqrt(2) - 1) * min(dx, dy)
 
     def get_valid_neighbors(self, node: Tuple[int, int]) -> List[Tuple[int, int]]:
-        """Get valid neighboring cells that aren't obstacles"""
+        """Get valid neighboring cells that aren't obstacles, with safety margin"""
         neighbors = []
         x, y = node
 
         for dx, dy in self.NEIGHBORS:
             new_x, new_y = x + dx, y + dy
 
-            # Check bounds
-            if (0 <= new_x < self.world_map.grid_size and
-                    0 <= new_y < self.world_map.grid_size):
+            # Check bounds with safety margin
+            safety_margin = 2  # cells
+            if (safety_margin <= new_x < self.world_map.grid_size - safety_margin and
+                    safety_margin <= new_y < self.world_map.grid_size - safety_margin):
 
-                # Check if cell is obstacle-free
-                if self.world_map.grid[new_y, new_x] == 0:
-                    # Check if diagonal move is valid (both adjacent cells must be free)
+                # Check if cell and surrounding area is obstacle-free
+                is_safe = True
+                for check_dx in range(-1, 2):
+                    for check_dy in range(-1, 2):
+                        check_x = new_x + check_dx
+                        check_y = new_y + check_dy
+                        if self.world_map.grid[check_y, check_x] != 0:
+                            is_safe = False
+                            break
+                    if not is_safe:
+                        break
+
+                if is_safe:
+                    # Check if diagonal move is valid (path must be clear)
                     if dx != 0 and dy != 0:
                         if (self.world_map.grid[y, new_x] == 0 and
                                 self.world_map.grid[new_y, x] == 0):
