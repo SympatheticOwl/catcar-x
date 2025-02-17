@@ -297,7 +297,6 @@ class AsyncObstacleAvoidance:
 
                 # Perform a complete environment scan
                 await self.scan_environment()
-                self.world_map.add_padding()
 
                 # Find best direction to turn
                 print("Finding best direction to escape obstacle...")
@@ -305,7 +304,7 @@ class AsyncObstacleAvoidance:
                 print(f"Best escape direction: {best_angle}° (clear path: {max_distance:.1f}cm)")
 
                 # Turn to the best direction
-                await self.px.turn_to_heading(self.px.heading + best_angle)
+                await self.px.turn_to_heading(best_angle)
 
                 # Update current position
                 current_pos = self.px.get_position()
