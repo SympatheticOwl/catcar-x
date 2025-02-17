@@ -243,126 +243,105 @@ class AsyncObstacleAvoidance:
         self.navigation_target = (target_x, target_y)
         self.is_navigating = True
 
-        # Add minimum distance threshold for heading changes
-        MIN_HEADING_CHANGE_DIST = 20  # cm
-        FINAL_APPROACH_DIST = self.world_map.resolution  # One grid cell
-
         try:
             while self.is_navigating:
+                # Get current position
                 current_pos = self.px.get_position()
                 current_x, current_y = current_pos['x'], current_pos['y']
 
                 # Check if we've reached the target
-                distance_to_target = math.sqrt(
-                    (target_x - current_x) ** 2 + (target_y - current_y) ** 2
-                )
-
-                if distance_to_target < self.world_map.resolution / 2:  # Within half a grid cell
+                distance_to_target = math.sqrt((target_x - current_x) ** 2 + (target_y - current_y) ** 2)
+                if distance_to_target < 10:  # Within 10cm
                     print("Reached target!")
                     self.px.stop()
                     self.is_navigating = False
                     return True
 
-                # When very close to target, use direct approach instead of waypoints
-                if distance_to_target < FINAL_APPROACH_DIST:
-                    print("Final approach to target")
-                    target_heading = self.px.get_target_heading(target_x, target_y)
+                # Calculate path to target
+                path = self.pathfinder.find_path(
+                    (current_x, current_y),
+                    (target_x, target_y)
+                )
 
-                    # Only adjust heading if we're significantly off
-                    current_heading = self.px.heading
-                    heading_diff = abs((target_heading - current_heading + 180) % 360 - 180)
-
-                    if heading_diff > 10:  # Only turn if more than 10 degrees off
-                        await self.px.turn_to_heading(target_heading)
-
-                    self.px.forward(self.speed)
-                    await asyncio.sleep(0.1)
-                    continue
-
-                # Regular pathfinding for longer distances
-                current_grid = self.world_map.world_to_grid(current_x, current_y)
-                target_grid = self.world_map.world_to_grid(target_x, target_y)
-
-                print(f"Current grid position: {current_grid}")
-                print(f"Target grid position: {target_grid}")
-
-                path = self.pathfinder.find_path(current_grid, target_grid)
                 if not path:
                     print("No path found to target!")
                     self.px.stop()
                     self.is_navigating = False
                     return False
 
-                path = self.pathfinder.post_process_path(path)
+                print(f"Found path with {len(path)} waypoints")
                 self.current_path = path
                 self.current_path_index = 0
 
-                print(f"Generated path: {path}")
-
+                # Follow path
                 while self.current_path_index < len(self.current_path):
-                    vision_obstacles = self.vision.get_obstacle_info()
-                    if vision_obstacles:
-                        for obstacle in vision_obstacles:
-                            if obstacle['label'] in ['person', 'cat']:
-                                print(f"Detected {obstacle['label']}, waiting...")
+                    # Check for obstacles from vision system
+                    if self.vision.detected_objects:
+                        for obj in self.vision.detected_objects:
+                            if obj['label'] in ['person', 'cat']:
+                                print(f"Detected {obj['label']}, waiting...")
                                 self.px.stop()
-                                await asyncio.sleep(0.5)
-                                continue
-                            elif obstacle['label'] == 'stop sign':
-                                print("Stop sign detected, stopping for 3 seconds")
-                                self.px.stop()
-                                await asyncio.sleep(3)
-
-                    next_x, next_y = self.current_path[self.current_path_index]
-
-                    # Calculate distance to next waypoint
-                    dist_to_waypoint = math.sqrt(
-                        (next_x - current_x) ** 2 + (next_y - current_y) ** 2
-                    )
-
-                    # Only change heading if we're far enough from the waypoint
-                    if dist_to_waypoint > MIN_HEADING_CHANGE_DIST:
-                        target_heading = self.px.get_target_heading(next_x, next_y)
-                        current_heading = self.px.heading
-                        heading_diff = abs((target_heading - current_heading + 180) % 360 - 180)
-
-                        if heading_diff > 10:  # Only turn if more than 10 degrees off
-                            await self.px.turn_to_heading(target_heading)
-
-                    self.is_moving = True
-                    self.px.forward(self.speed)
-
-                    while True:
-                        current_pos = self.px.get_position()
-                        distance = math.sqrt(
-                            (next_x - current_pos['x']) ** 2 +
-                            (next_y - current_pos['y']) ** 2
-                        )
-
-                        if distance < self.world_map.resolution / 2:
-                            print(f"Reached waypoint {self.current_path_index}")
-                            self.current_path_index += 1
-                            break
-
-                        if self.current_distance < self.min_distance and not self.is_backing_up:
-                            print(f"Obstacle detected by ultrasonic at {self.current_distance}cm")
-                            await self.scan_environment()
-                            await self.emergency_stop()
-                            break
-
-                        vision_obstacles = self.vision.get_obstacle_info()
-                        if vision_obstacles:
-                            need_stop = False
-                            for obstacle in vision_obstacles:
-                                if obstacle['label'] in ['person', 'cat', 'stop sign']:
-                                    need_stop = True
-                                    break
-                            if need_stop:
-                                self.px.stop()
-                                self.is_moving = False
+                                while any(o['label'] in ['person', 'cat']
+                                          for o in self.vision.detected_objects):
+                                    await asyncio.sleep(0.5)
+                                print(f"{obj['label']} cleared, resuming navigation")
                                 break
 
+                            elif obj['label'] == 'stop_sign':
+                                print("Stop sign detected, waiting 3 seconds")
+                                self.px.stop()
+                                await asyncio.sleep(3.0)
+                                print("Resuming after stop sign")
+                                break
+
+                    # Get next waypoint
+                    next_x, next_y = self.current_path[self.current_path_index]
+
+                    # Calculate heading to waypoint
+                    target_heading = self.px.get_target_heading(next_x, next_y)
+                    current_heading = self.px.heading
+
+                    # Calculate angle difference
+                    angle_diff = ((target_heading - current_heading + 180) % 360) - 180
+
+                    # If angle difference is large, turn in place
+                    if abs(angle_diff) > 45:
+                        print(f"Turning to heading {target_heading}")
+                        await self.px.turn_to_heading(target_heading)
+                        continue
+
+                    # Calculate steering angle
+                    steering_angle = self.px.calculate_steering_angle(angle_diff)
+                    self.px.set_dir_servo_angle(steering_angle)
+
+                    # Move forward
+                    if not self.is_moving:
+                        self.is_moving = True
+                        self.px.forward(self.speed)
+
+                    # Check if we've reached the waypoint
+                    current_pos = self.px.get_position()
+                    dist_to_waypoint = math.sqrt(
+                        (next_x - current_pos['x']) ** 2 +
+                        (next_y - current_pos['y']) ** 2
+                    )
+
+                    if dist_to_waypoint < 10:  # Within 10cm
+                        print(f"Reached waypoint {self.current_path_index}")
+                        self.current_path_index += 1
+
+                    # Check for emergency stop
+                    if self.emergency_stop_flag:
+                        print("Emergency stop triggered, recalculating path")
+                        break
+
+                    await asyncio.sleep(0.1)
+
+                # If we were emergency stopped, wait for evasive maneuver
+                if self.emergency_stop_flag:
+                    while self.current_maneuver:
                         await asyncio.sleep(0.1)
+                    continue
 
         except asyncio.CancelledError:
             print("Navigation cancelled")

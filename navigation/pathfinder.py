@@ -4,147 +4,199 @@ import math
 import time
 from dataclasses import dataclass, field
 from heapq import heappush, heappop
-from typing import List, Tuple, Optional, Set
+from typing import List, Tuple, Optional, Set, Dict
 
 from picarx_wrapper import PicarXWrapper
 from world_map import WorldMap
 
 
-@dataclass(order=True)
-class Node:
-    position: Tuple[int, int] = field(compare=False)
-    g_cost: float = field(compare=False)
-    h_cost: float = field(compare=False)
-    f_cost: float = field(default=float('inf'))
-    parent: 'Node' = field(default=None, compare=False)
-
-    def __post_init__(self):
-        self.f_cost = self.g_cost + self.h_cost
-
-
 class Pathfinder:
-    def __init__(self, world_map: WorldMap):
+    def __init__(self, world_map, picar):
         self.world_map = world_map
-        self.grid_cell_size = world_map.resolution  # 40cm per grid cell
+        self.picar = picar
 
-        # Define movement directions (8-directional)
+        # Pathfinding parameters
         self.directions = [
-            (-1, -1), (-1, 0), (-1, 1),
-            (0, -1), (0, 1),
-            (1, -1), (1, 0), (1, 1)
+            (0, 1),  # north
+            (1, 1),  # northeast
+            (1, 0),  # east
+            (1, -1),  # southeast
+            (0, -1),  # south
+            (-1, -1),  # southwest
+            (-1, 0),  # west
+            (-1, 1)  # northwest
         ]
 
-    def heuristic(self, pos: Tuple[int, int], goal: Tuple[int, int]) -> float:
-        """Calculate heuristic cost using diagonal distance"""
-        dx = abs(pos[0] - goal[0])
-        dy = abs(pos[1] - goal[1])
-        # Scale by grid cell size since we're working in grid coordinates
-        return (max(dx, dy) + (math.sqrt(2) - 1) * min(dx, dy)) * self.grid_cell_size
+        # Cost for diagonal vs straight movement
+        self.STRAIGHT_COST = 1.0
+        self.DIAGONAL_COST = 1.4
 
-    def get_neighbors(self, node: Node, goal: Tuple[int, int]) -> List[Node]:
-        """Get valid neighboring nodes"""
-        neighbors = []
+        # Minimum turning radius considerations
+        self.MIN_TURN_RADIUS = self.picar.get_min_turn_radius()
+        self.GRID_CELL_SIZE = self.world_map.grid_size
+        self.MIN_TURN_RADIUS_CELLS = int(self.MIN_TURN_RADIUS / self.GRID_CELL_SIZE)
 
-        for dx, dy in self.directions:
-            new_x = node.position[0] + dx
-            new_y = node.position[1] + dy
+    def heuristic(self, a: Tuple[int, int], b: Tuple[int, int]) -> float:
+        """Calculate heuristic distance between two points"""
+        return math.sqrt((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2)
 
-            # Check bounds
-            if (0 <= new_x < self.world_map.grid_size and
-                    0 <= new_y < self.world_map.grid_size):
+    def get_movement_cost(self, current: Tuple[int, int], next_pos: Tuple[int, int],
+                          came_from: Dict[Tuple[int, int], Tuple[int, int]]) -> float:
+        """Calculate movement cost considering turning radius"""
+        # Base cost (straight or diagonal)
+        dx = abs(next_pos[0] - current[0])
+        dy = abs(next_pos[1] - current[1])
+        base_cost = self.DIAGONAL_COST if dx + dy == 2 else self.STRAIGHT_COST
 
-                # Check if cell is obstacle-free
-                if self.world_map.grid[new_y, new_x] == 0:
-                    # Calculate real-world distance for this movement
-                    movement_cost = (math.sqrt(2) if dx != 0 and dy != 0 else 1.0) * self.grid_cell_size
-                    g_cost = node.g_cost + movement_cost
-                    h_cost = self.heuristic((new_x, new_y), goal)
+        # Check if we need to consider turning radius
+        if current in came_from:
+            prev = came_from[current]
+            # Calculate angles
+            prev_angle = math.atan2(current[1] - prev[1], current[0] - prev[0])
+            next_angle = math.atan2(next_pos[1] - current[1], next_pos[0] - current[0])
+            angle_diff = abs(math.degrees(next_angle - prev_angle))
 
-                    neighbors.append(Node(
-                        position=(new_x, new_y),
-                        g_cost=g_cost,
-                        h_cost=h_cost,
-                        parent=node
-                    ))
+            # Add turning penalty if turn is too sharp
+            if angle_diff > 45:  # Sharp turn threshold
+                required_radius = self.MIN_TURN_RADIUS_CELLS
+                actual_radius = math.sqrt((next_pos[0] - current[0]) ** 2 +
+                                          (next_pos[1] - current[1]) ** 2)
+                if actual_radius < required_radius:
+                    base_cost *= 2.0  # Penalty for sharp turns
 
-        return neighbors
+        return base_cost
 
-    def find_path(self, start: Tuple[int, int], goal: Tuple[int, int]) -> List[Tuple[float, float]]:
-        """Find path using A* algorithm"""
-        # Initialize open and closed sets
-        open_set: List[Node] = []
-        closed_set: Set[Tuple[int, int]] = set()
+    def is_valid_position(self, pos: Tuple[int, int]) -> bool:
+        """Check if a position is valid (within bounds and not obstacle)"""
+        x, y = pos
+        if 0 <= x < self.world_map.grid_size and 0 <= y < self.world_map.grid_size:
+            return self.world_map.grid[y, x] == 0
+        return False
 
-        # Create start node
-        start_node = Node(
-            position=start,
-            g_cost=0,
-            h_cost=self.heuristic(start, goal)
-        )
+    def find_path(self, start_world: Tuple[float, float],
+                  goal_world: Tuple[float, float]) -> List[Tuple[float, float]]:
+        """Find path from start to goal in world coordinates"""
+        # Convert world coordinates to grid coordinates
+        start_grid = self.world_map.world_to_grid(start_world[0], start_world[1])
+        goal_grid = self.world_map.world_to_grid(goal_world[0], goal_world[1])
 
-        # Add start node to open set
-        heapq.heappush(open_set, start_node)
+        # Initialize data structures
+        frontier = []
+        heappush(frontier, (0, start_grid))
+        came_from = {start_grid: None}
+        cost_so_far = {start_grid: 0}
 
-        while open_set:
-            current = heapq.heappop(open_set)
+        found_path = False
+        while frontier:
+            current = heappop(frontier)[1]
 
-            # If we reached the goal
-            if current.position == goal:
-                path = []
-                while current:
-                    # Convert grid coordinates to world coordinates
-                    world_x, world_y = self.world_map.grid_to_world(
-                        current.position[0], current.position[1]
-                    )
-                    path.append((world_x, world_y))
-                    current = current.parent
-                return path[::-1]  # Reverse path to get start-to-goal order
+            if current == goal_grid:
+                found_path = True
+                break
 
-            # Add current node to closed set
-            closed_set.add(current.position)
+            # Check all neighboring cells
+            for dx, dy in self.directions:
+                next_pos = (current[0] + dx, current[1] + dy)
 
-            # Check neighbors
-            for neighbor in self.get_neighbors(current, goal):
-                if neighbor.position in closed_set:
+                if not self.is_valid_position(next_pos):
                     continue
 
-                existing = next((node for node in open_set
-                                 if node.position == neighbor.position), None)
+                # Calculate new cost
+                new_cost = cost_so_far[current] + self.get_movement_cost(current, next_pos, came_from)
 
-                if not existing or neighbor.g_cost < existing.g_cost:
-                    if existing:
-                        open_set.remove(existing)
-                    heapq.heappush(open_set, neighbor)
+                if next_pos not in cost_so_far or new_cost < cost_so_far[next_pos]:
+                    cost_so_far[next_pos] = new_cost
+                    priority = new_cost + self.heuristic(goal_grid, next_pos)
+                    heappush(frontier, (priority, next_pos))
+                    came_from[next_pos] = current
 
-        return []  # No path found
+        if not found_path:
+            return []
 
-    def post_process_path(self, path: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
-        """Post-process path to add intermediate waypoints for long segments"""
-        if not path:
+        # Reconstruct path
+        path_grid = []
+        current = goal_grid
+        while current is not None:
+            path_grid.append(current)
+            current = came_from[current]
+        path_grid.reverse()
+
+        # Convert back to world coordinates
+        path_world = [self.world_map.grid_to_world(x, y) for x, y in path_grid]
+
+        # Smooth path
+        return self.smooth_path(path_world)
+
+    def smooth_path(self, path: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+        """Smooth the path to make it more drivable"""
+        if len(path) <= 2:
             return path
 
-        final_path = []
-        max_segment_length = self.grid_cell_size  # One grid cell length
+        smoothed = [path[0]]
+        current_idx = 0
 
-        for i in range(len(path) - 1):
-            p1 = path[i]
-            p2 = path[i + 1]
+        while current_idx < len(path) - 1:
+            # Look ahead to find furthest point we can directly reach
+            for lookahead in range(len(path) - 1, current_idx, -1):
+                # Check if direct path to lookahead point is clear
+                start = path[current_idx]
+                end = path[lookahead]
 
-            # Add first point
-            final_path.append(p1)
+                if self.is_path_clear(start, end):
+                    smoothed.append(end)
+                    current_idx = lookahead
+                    break
+            else:
+                # If no clear path found, add next point
+                current_idx += 1
+                smoothed.append(path[current_idx])
 
-            # Calculate distance between points
-            dist = math.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2)
+        return smoothed
 
-            # Add intermediate points if segment is too long
-            if dist > max_segment_length:
-                num_points = int(dist / max_segment_length)
-                for j in range(1, num_points):
-                    t = j / num_points
-                    x = p1[0] + t * (p2[0] - p1[0])
-                    y = p1[1] + t * (p2[1] - p1[1])
-                    final_path.append((x, y))
+    def is_path_clear(self, start: Tuple[float, float],
+                      end: Tuple[float, float]) -> bool:
+        """Check if direct path between points is clear of obstacles"""
+        # Convert to grid coordinates
+        start_grid = self.world_map.world_to_grid(start[0], start[1])
+        end_grid = self.world_map.world_to_grid(end[0], end[1])
 
-        # Add final point
-        final_path.append(path[-1])
-        return final_path
+        # Get points along line
+        points = self.get_line_points(start_grid, end_grid)
+
+        # Check each point
+        return all(self.is_valid_position(point) for point in points)
+
+    def get_line_points(self, start: Tuple[int, int],
+                        end: Tuple[int, int]) -> List[Tuple[int, int]]:
+        """Get all grid points along a line using Bresenham's algorithm"""
+        x1, y1 = start
+        x2, y2 = end
+        points = []
+
+        dx = abs(x2 - x1)
+        dy = abs(y2 - y1)
+        x, y = x1, y1
+        sx = 1 if x1 < x2 else -1
+        sy = 1 if y1 < y2 else -1
+
+        if dx > dy:
+            err = dx / 2.0
+            while x != x2:
+                points.append((x, y))
+                err -= dy
+                if err < 0:
+                    y += sy
+                    err += dx
+                x += sx
+        else:
+            err = dy / 2.0
+            while y != y2:
+                points.append((x, y))
+                err -= dx
+                if err < 0:
+                    x += sx
+                    err += dy
+                y += sy
+
+        points.append((x, y))
+        return points
