@@ -29,6 +29,8 @@ class AsyncObstacleAvoidance:
         self.turn_time = 1.5
         self.speed = 30
         self.sensor_read_freq = 0.05
+        self.scan_range = (-60, 60)
+        self.scan_step = 5
 
         # state management
         self.current_distance = 100
@@ -43,11 +45,6 @@ class AsyncObstacleAvoidance:
         self.vision_enabled = True
         self.vision_clear = True
 
-        # Navigation state
-        self.navigation_target = None
-        self.navigation_task = None
-        self.movement_task = None
-        self.is_navigating = False
 
     def _update_ultrasonic_detection(self, distance: float):
         """Update map with obstacle detected by ultrasonic sensor"""
@@ -232,78 +229,118 @@ class AsyncObstacleAvoidance:
             self.current_maneuver = None
 
     async def forward_movement(self):
-        """Modified forward movement to work with pathfinding"""
         while True:
             if not self.emergency_stop_flag and not self.current_maneuver:
-                # Only handle forward movement when not navigating to a point
-                if not self.is_navigating:
-                    # Check both ultrasonic and vision systems
-                    if self.vision_enabled:
-                        objects = self.vision.get_obstacle_info()
-                        if objects:
-                            for obj in objects:
-                                print(f"Vision system detected: {obj['label']}")
-                                if obj['label'] == "stop sign":
-                                    print("STOP!!!!")
-                                    self.vision_clear = False
+                # Check both ultrasonic and vision systems
+                if self.vision_enabled:
+                    objects = self.vision.get_obstacle_info()
+                    if objects:
+                        for obj in objects:
+                            print(f"Vision system detected: {obj['label']}")
+                            if obj['label'] == "stop sign":
+                                print("STOP!!!!")
+                                self.vision_clear = False
 
-                    # Move forward if clear
-                    if self.current_distance >= self.min_distance and not self.is_cliff:
-                        if not self.is_moving:
-                            print("Moving forward...")
-                            self.is_moving = True
-                            self.px.forward(self.speed)
-                    else:
-                        if self.is_moving:
-                            if self.is_cliff:
-                                print("Cliff detected!")
-                            elif not self.vision_clear:
-                                print("Vision system detected obstacle!")
-                            else:
-                                print(f"Ultrasonic detected obstacle at {self.current_distance:.1f}cm")
-                            self.is_moving = False
-                            self.px.forward(0)
-                            self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
+                if (self.current_distance >= self.min_distance and not self.is_cliff):
+                    if not self.is_moving:
+                        print("Moving forward...")
+                        self.is_moving = True
+                        self.px.forward(self.speed)
+                else:
+                    if self.is_moving:
+                        if self.is_cliff:
+                            print("Cliff detected!")
+                        elif not self.vision_clear:
+                            print("Vision system detected obstacle!")
+                        else:
+                            print(f"Ultrasonic detected obstacle at {self.current_distance:.1f}cm")
+                        self.is_moving = False
+                        self.px.forward(0)
+                        self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
 
             await asyncio.sleep(0.1)
 
     async def navigate_to_point(self, target_x, target_y, speed=30):
-        """Navigate to a target point while accounting for turning radius"""
+        """Navigate to a target point using A* pathfinding"""
+        print(f"Starting navigation to ({target_x}, {target_y})")
+
         while True:
+            current_pos = self.px.get_position()
+            current_x, current_y = current_pos['x'], current_pos['y']
 
-            # Calculate distance and angle to target
-            dx = target_x - self.px.x
-            dy = target_y - self.px.y
-            print(f'self.x: {self.px.x}, self.y: {self.px.y}')
-            print(f'target.x: {self.px.x}, target.y: {self.px.y}')
-            distance_to_target = math.sqrt(dx ** 2 + dy ** 2)
-
-            # If we're close enough to target, stop
+            # Check if we've reached the target
+            distance_to_target = math.sqrt(
+                (target_x - current_x) ** 2 +
+                (target_y - current_y) ** 2
+            )
             if distance_to_target < 5:  # 5cm threshold
+                print("Reached target!")
                 self.px.stop()
                 return True
 
-            # Calculate target angle in degrees
-            target_angle = math.degrees(math.atan2(dy, dx))
+            # Get current path or calculate new one
+            if not self.pathfinder.current_path:
+                print("Calculating initial path...")
+                path = await self.pathfinder.find_path(
+                    current_x, current_y,
+                    target_x, target_y
+                )
+                if not path:
+                    print("No valid path found!")
+                    self.px.stop()
+                    return False
 
-            # Calculate angle difference
-            angle_diff = target_angle - self.px.heading
-            # Normalize to -180 to 180
-            angle_diff = (angle_diff + 180) % 360 - 180
-
-            # If we need to turn more than 45 degrees, stop and turn first
-            if abs(angle_diff) > 45:
+            # Scan environment and update world map
+            if self.current_distance < self.min_distance or not self.vision_clear:
+                print("Obstacle detected! Updating world map...")
                 self.px.stop()
-                await self.px.turn_to_heading(target_angle)
-                continue
+                await self.scan_environment()
+                self.world_map.add_padding()
 
-            # Calculate steering angle based on angle difference
-            steering_angle = self.px.calculate_steering_angle(angle_diff)
-            self.px.set_dir_servo_angle(steering_angle)
+                # Recalculate path
+                print("Recalculating path...")
+                path = await self.pathfinder.update_path(
+                    current_x, current_y,
+                    target_x, target_y
+                )
+                if not path:
+                    print("No valid path found after obstacle detection!")
+                    return False
 
-            # Adjust speed based on turn sharpness
-            adjusted_speed = speed * (1 - abs(steering_angle) / (2 * self.px.MAX_STEERING_ANGLE))
-            self.px.forward(adjusted_speed)
+            # Get next waypoint
+            if len(self.pathfinder.current_path) > 1:
+                next_x, next_y = self.pathfinder.current_path[1]
+
+                # Calculate angle to next waypoint
+                dx = next_x - current_x
+                dy = next_y - current_y
+                target_angle = math.degrees(math.atan2(dy, dx))
+
+                # Calculate angle difference
+                angle_diff = target_angle - self.px.heading
+                # Normalize to -180 to 180
+                angle_diff = (angle_diff + 180) % 360 - 180
+
+                # Calculate steering angle
+                steering_angle = self.px.calculate_steering_angle(angle_diff)
+                self.px.set_dir_servo_angle(steering_angle)
+
+                # Adjust speed based on turn sharpness
+                adjusted_speed = speed * (1 - abs(steering_angle) / (2 * self.px.MAX_STEERING_ANGLE))
+
+                # Move forward if no obstacles detected
+                if self.current_distance >= self.min_distance and self.vision_clear:
+                    self.px.forward(adjusted_speed)
+                else:
+                    self.px.stop()
+
+                # Remove waypoint if we're close enough
+                waypoint_distance = math.sqrt(
+                    (next_x - current_x) ** 2 +
+                    (next_y - current_y) ** 2
+                )
+                if waypoint_distance < 10:  # 10cm threshold
+                    self.pathfinder.current_path.pop(0)
 
             await asyncio.sleep(0.1)
 
