@@ -242,11 +242,29 @@ class AsyncObstacleAvoidance:
         print(f"Starting navigation to target ({target_x}, {target_y})")
         self.is_navigating = True
 
+        # Convert target to grid coordinates to verify it's within bounds
+        target_grid = self.world_map.world_to_grid(target_x, target_y)
+        if (target_grid[0] < 0 or target_grid[0] >= self.world_map.grid_size or
+                target_grid[1] < 0 or target_grid[1] >= self.world_map.grid_size):
+            print("Target position is outside the grid bounds")
+            self.is_navigating = False
+            return False
+
         while self.is_navigating:
             try:
                 # Get current position
                 current_pos = self.px.get_position()
                 start_pos = (current_pos['x'], current_pos['y'])
+
+                # Convert to grid coordinates
+                start_grid = self.world_map.world_to_grid(start_pos[0], start_pos[1])
+
+                # Verify current position is within bounds
+                if (start_grid[0] < 0 or start_grid[0] >= self.world_map.grid_size or
+                        start_grid[1] < 0 or start_grid[1] >= self.world_map.grid_size):
+                    print("Current position is outside the grid bounds")
+                    self.is_navigating = False
+                    return False
 
                 # Find path to target
                 path = self.pathfinder.find_path(start_pos, (target_x, target_y))
@@ -268,6 +286,16 @@ class AsyncObstacleAvoidance:
                     # Get next waypoint
                     waypoint = self.current_path[self.current_path_index]
 
+                    # Convert waypoint to grid coordinates for distance check
+                    waypoint_grid = self.world_map.world_to_grid(waypoint[0], waypoint[1])
+                    current_grid = self.world_map.world_to_grid(current_pos['x'], current_pos['y'])
+
+                    # Calculate grid cell distance to detect obstacles
+                    grid_distance = np.sqrt(
+                        (waypoint_grid[0] - current_grid[0]) ** 2 +
+                        (waypoint_grid[1] - current_grid[1]) ** 2
+                    )
+
                     # Calculate heading to waypoint
                     target_heading = self.px.get_target_heading(waypoint[0], waypoint[1])
 
@@ -281,20 +309,32 @@ class AsyncObstacleAvoidance:
                     # Wait until we reach waypoint or detect obstacle
                     while self.is_moving:
                         current_pos = self.px.get_position()
+                        current_grid = self.world_map.world_to_grid(current_pos['x'], current_pos['y'])
+
+                        # Calculate both real-world and grid distances
                         dist_to_waypoint = np.sqrt(
                             (waypoint[0] - current_pos['x']) ** 2 +
                             (waypoint[1] - current_pos['y']) ** 2
                         )
 
-                        # Check if we've reached waypoint
-                        if dist_to_waypoint < 10.0:  # Within 10cm
+                        grid_dist_to_waypoint = np.sqrt(
+                            (waypoint_grid[0] - current_grid[0]) ** 2 +
+                            (waypoint_grid[1] - current_grid[1]) ** 2
+                        )
+
+                        # Check if we've reached waypoint (within 1/4 grid cell)
+                        if grid_dist_to_waypoint < 0.25:
                             self.current_path_index += 1
                             break
 
-                        # If obstacle detected within 1 grid space
-                        if (self.current_distance < self.world_map.resolution or
-                                not self.pathfinder.is_path_clear(self.current_path[self.current_path_index:])):
-                            print("Obstacle detected, replanning path...")
+                        # If obstacle detected within 1 grid cell
+                        obstacle_grid_dist = self.current_distance / self.world_map.resolution
+                        if (obstacle_grid_dist <= 1.0 or
+                                not self.pathfinder.is_line_of_sight_clear(
+                                    (current_pos['x'], current_pos['y']),
+                                    waypoint
+                                )):
+                            print(f"Obstacle detected at {obstacle_grid_dist:.1f} grid cells away")
                             self.px.forward(0)
                             self.is_moving = False
 
