@@ -304,77 +304,62 @@ class AsyncObstacleAvoidance:
         return True  # Path completed successfully
 
     async def navigate_to_target(self, target_x: float, target_y: float):
-        """Navigate to target coordinates using A* pathfinding with obstacle avoidance"""
-        print(f"\nNavigating to target: ({target_x}, {target_y})")
-        self.is_navigating = True
-        retry_count = 0
-        MAX_RETRIES = 5
+        """Navigate to target coordinates while avoiding obstacles"""
+        print(f"Starting navigation to target ({target_x}, {target_y})")
 
-        while self.is_navigating and retry_count < MAX_RETRIES:
-            # Get current position
-            current_pos = self.px.get_position()
-            current_x = current_pos['x']
-            current_y = current_pos['y']
+        # Adjust world map resolution to 20cm
+        self.world_map = WorldMap(map_size=400, resolution=20.0)
 
-            # Check if we're close enough to target
-            distance_to_target = math.sqrt(
-                (target_x - current_x) ** 2 +
-                (target_y - current_y) ** 2
-            )
-
-            if distance_to_target <= self.world_map.resolution:
-                print("Reached target!")
-                self.is_navigating = False
-                self.px.forward(0)
-                return True
-
-            # Initial environment scan if this is first attempt or after obstacle
-            if retry_count == 0 or self.current_path is None:
-                print("Performing initial environment scan...")
-                await self.scan_environment()
-
-            # Find path to target
-            print("Calculating path to target...")
-            path = await self.pathfinder.find_path(
-                current_x, current_y,
-                target_x, target_y
-            )
-
-            if not path:
-                print(f"No path found to target! (Attempt {retry_count + 1}/{MAX_RETRIES})")
-                retry_count += 1
+        while True:
+            if self.emergency_stop_flag:
+                print("Navigation paused - emergency stop active")
                 await asyncio.sleep(0.5)
                 continue
 
-            print(f"Found path with {len(path)} waypoints: {path}")
-            self.current_path = path
-            self.current_path_index = 0
+            current_pos = self.px.get_position()
 
-            # Execute path
-            success = await self.pathfinder.execute_path(path)
-
-            if not success:
-                print("Path execution interrupted by obstacle!")
-                self.px.forward(0)  # Ensure we're stopped
-
-                # Scan for new obstacles
-                print("Scanning for obstacles...")
-                await self.scan_environment()
-
-                # Increment retry counter
-                retry_count += 1
-                print(f"Retrying navigation (Attempt {retry_count}/{MAX_RETRIES})")
-
-                # Small delay before retrying
-                await asyncio.sleep(0.5)
-            else:
-                self.is_navigating = False
+            # Check if we're close enough to target
+            if self.pathfinder.is_near_target(current_pos['x'], current_pos['y'],
+                                              target_x, target_y):
+                print("Target reached!")
+                self.px.stop()
                 return True
 
-        # If we get here, we've exceeded max retries
-        print("Failed to reach target after maximum retry attempts!")
-        self.is_navigating = False
-        return False
+            # If we need to scan environment or recalculate path
+            if (self.current_distance < self.world_map.resolution or
+                    not self.current_path or
+                    self.emergency_stop_flag):
+
+                print("Scanning environment and recalculating path...")
+                self.px.stop()
+                await self.scan_environment()
+                self.world_map.add_padding()
+
+                # Find new path
+                self.current_path = self.pathfinder.find_path(
+                    current_pos['x'], current_pos['y'],
+                    target_x, target_y
+                )
+
+                if not self.current_path:
+                    print("No valid path found to target!")
+                    return False
+
+                self.current_path_index = 0
+                print(f"New path calculated with {len(self.current_path)} waypoints")
+
+            # Navigate to next waypoint
+            if self.current_path_index < len(self.current_path):
+                next_x, next_y = self.current_path[self.current_path_index]
+
+                # Use navigate_to_point for precise movement to waypoint
+                reached = await self.px.navigate_to_point(next_x, next_y, self.speed)
+
+                if reached:
+                    self.current_path_index += 1
+                    print(f"Reached waypoint {self.current_path_index}/{len(self.current_path)}")
+
+            await asyncio.sleep(0.1)
 
     async def run(self):
         print("Starting enhanced obstacle avoidance program...")

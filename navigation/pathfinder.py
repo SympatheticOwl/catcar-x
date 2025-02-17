@@ -11,17 +11,36 @@ from picarx_wrapper import PicarXWrapper
 from world_map import WorldMap
 
 
+@dataclass
+class Node:
+    x: int  # grid coordinates
+    y: int
+    g_cost: float = float('inf')  # cost from start
+    h_cost: float = float('inf')  # heuristic cost to goal
+    parent: 'Node' = None
+
+    @property
+    def f_cost(self) -> float:
+        return self.g_cost + self.h_cost
+
+    def __eq__(self, other):
+        if not isinstance(other, Node):
+            return False
+        return self.x == other.x and self.y == other.y
+
+    def __hash__(self):
+        return hash((self.x, self.y))
+
+
 class Pathfinder:
-    def __init__(self, world_map, picarx):
+    def __init__(self, world_map: WorldMap, picar: PicarXWrapper):
         self.world_map = world_map
-        self.px = picarx
+        self.picar = picar
+        self.current_path = []
+        self.current_path_index = 0
 
-        # Movement costs
-        self.STRAIGHT_COST = 1.0
-        self.DIAGONAL_COST = 1.4  # sqrt(2)
-
-        # Grid directions (8-directional movement)
-        self.DIRECTIONS = [
+        # Movement directions (8-directional)
+        self.directions = [
             (0, 1),  # N
             (1, 1),  # NE
             (1, 0),  # E
@@ -29,199 +48,103 @@ class Pathfinder:
             (0, -1),  # S
             (-1, -1),  # SW
             (-1, 0),  # W
-            (-1, 1),  # NW
+            (-1, 1)  # NW
         ]
 
-        # Movement timing constants
-        self.TURN_45_TIME = 1.0  # seconds for 45-degree turn
-        self.TURN_90_TIME = 2.0  # seconds for 90-degree turn
-        self.MOVEMENT_SPEED = 30
-        self.GRID_MOVE_TIME = 1.0  # seconds to move one grid space
+    def heuristic(self, node: Node, goal: Node) -> float:
+        """Calculate heuristic cost using diagonal distance"""
+        dx = abs(node.x - goal.x)
+        dy = abs(node.y - goal.y)
+        return math.sqrt(dx * dx + dy * dy)
 
-        # Obstacle detection
-        self.MIN_OBSTACLE_DISTANCE = self.world_map.resolution  # One grid space
-        self.SCANNING_ANGLES = range(-60, 61, 5)  # Scanning sweep angles
+    def get_neighbors(self, node: Node) -> List[Node]:
+        """Get valid neighboring nodes"""
+        neighbors = []
 
-    def heuristic(self, a: Tuple[int, int], b: Tuple[int, int]) -> float:
-        """Calculate heuristic (diagonal distance) between points"""
-        dx = abs(a[0] - b[0])
-        dy = abs(a[1] - b[1])
-        return max(dx, dy) + (math.sqrt(2) - 1) * min(dx, dy)
+        for dx, dy in self.directions:
+            new_x = node.x + dx
+            new_y = node.y + dy
 
-    def get_grid_direction(self, current: Tuple[int, int], next: Tuple[int, int]) -> int:
-        """Get direction index (0-7) for movement between grid cells"""
-        dx = next[0] - current[0]
-        dy = next[1] - current[1]
+            # Check bounds
+            if (0 <= new_x < self.world_map.grid_size and
+                    0 <= new_y < self.world_map.grid_size):
 
-        for i, (dir_x, dir_y) in enumerate(self.DIRECTIONS):
-            if (dir_x, dir_y) == (dx, dy):
-                return i
-        return 0  # Default to North if no match
+                # Check if cell is obstacle-free
+                if self.world_map.grid[new_y, new_x] == 0:
+                    neighbor = Node(new_x, new_y)
 
-    def direction_to_angle(self, direction: int) -> float:
-        """Convert direction index to angle in degrees"""
-        return direction * 45.0
+                    # Calculate movement cost (diagonal movement costs more)
+                    if dx == 0 or dy == 0:
+                        movement_cost = 1.0
+                    else:
+                        movement_cost = 1.4  # sqrt(2)
 
-    async def check_for_obstacles(self) -> bool:
-        """Check if there are any obstacles within one grid space"""
-        # Get multiple ultrasonic readings for reliability
-        distances = []
-        for _ in range(3):
-            dist = self.px.ultrasonic.read()
-            if dist and 0 < dist < 300:  # Filter invalid readings
-                distances.append(dist)
-            await asyncio.sleep(0.01)
+                    neighbor.g_cost = node.g_cost + movement_cost
+                    neighbors.append(neighbor)
 
-        if not distances:
-            return False
+        return neighbors
 
-        avg_distance = sum(distances) / len(distances)
-        return avg_distance <= self.MIN_OBSTACLE_DISTANCE
-
-    async def scan_environment(self):
-        """Perform a detailed scan of the environment"""
-        print("Scanning environment for obstacles...")
-        self.px.forward(0)  # Stop movement
-
-        # Save original camera angle
-        original_angle = self.px.current_steering_angle
-
-        # Sweep ultrasonic sensor
-        for angle in self.SCANNING_ANGLES:
-            self.px.set_cam_pan_angle(angle)
-            await asyncio.sleep(0.05)  # Let servo settle
-
-            # Get multiple readings at each angle
-            distances = []
-            for _ in range(3):
-                dist = self.px.ultrasonic.read()
-                if dist and 0 < dist < 300:
-                    distances.append(dist)
-                await asyncio.sleep(0.01)
-
-            if distances:
-                avg_distance = sum(distances) / len(distances)
-                # Convert polar coordinates to world coordinates
-                angle_rad = math.radians(angle + self.px.heading)
-                obs_x = self.px.x + avg_distance * math.cos(angle_rad)
-                obs_y = self.px.y + avg_distance * math.sin(angle_rad)
-
-                # Add obstacle to world map
-                self.world_map.add_obstacle(
-                    x=obs_x,
-                    y=obs_y,
-                    radius=5.0,  # 5cm radius for point obstacles
-                    confidence=0.8,
-                    label="ultrasonic_detection"
-                )
-
-        # Reset camera angle
-        self.px.set_cam_pan_angle(original_angle)
-
-        # Add padding around detected obstacles
-        # self.world_map.add_padding()
-        print("Environment scan complete")
-
-    async def find_path(self, start_x: float, start_y: float,
-                        target_x: float, target_y: float) -> Optional[List[Tuple[int, int]]]:
-        """Find path using A* algorithm, operating in grid coordinates"""
+    def find_path(self, start_x: float, start_y: float,
+                  goal_x: float, goal_y: float) -> List[Tuple[float, float]]:
+        """Find path from start to goal using A* algorithm"""
         # Convert world coordinates to grid coordinates
-        start_grid = self.world_map.world_to_grid(start_x, start_y)
-        target_grid = self.world_map.world_to_grid(target_x, target_y)
+        start_grid_x, start_grid_y = self.world_map.world_to_grid(start_x, start_y)
+        goal_grid_x, goal_grid_y = self.world_map.world_to_grid(goal_x, goal_y)
 
-        # Check if target is reachable (not in obstacle)
-        if self.world_map.grid[target_grid[1], target_grid[0]] != 0:
-            print("Target location is blocked by obstacle!")
-            return None
+        start_node = Node(start_grid_x, start_grid_y, g_cost=0)
+        goal_node = Node(goal_grid_x, goal_grid_y)
 
-        # Initialize data structures
-        frontier = []
-        heapq.heappush(frontier, (0, start_grid))
-        came_from = {start_grid: None}
-        cost_so_far = {start_grid: 0}
+        # Initialize open and closed sets
+        open_set = {start_node}
+        closed_set = set()
 
-        while frontier:
-            current = heapq.heappop(frontier)[1]
+        # Calculate initial heuristic
+        start_node.h_cost = self.heuristic(start_node, goal_node)
 
-            if current == target_grid:
-                break
+        while open_set:
+            # Get node with lowest f_cost
+            current = min(open_set, key=lambda n: n.f_cost)
 
-            # Check all 8 directions
-            for dx, dy in self.DIRECTIONS:
-                next_x = current[0] + dx
-                next_y = current[1] + dy
-                next_cell = (next_x, next_y)
+            # Check if we've reached the goal
+            if current.x == goal_node.x and current.y == goal_node.y:
+                return self._reconstruct_path(current)
 
-                # Check bounds
-                if (0 <= next_x < self.world_map.grid_size and
-                        0 <= next_y < self.world_map.grid_size):
+            open_set.remove(current)
+            closed_set.add(current)
 
-                    # Check if cell is free (not an obstacle)
-                    if self.world_map.grid[next_y, next_x] == 0:
-                        # Calculate movement cost
-                        movement_cost = (self.DIAGONAL_COST if dx != 0 and dy != 0
-                                         else self.STRAIGHT_COST)
-                        new_cost = cost_so_far[current] + movement_cost
+            # Check neighbors
+            for neighbor in self.get_neighbors(current):
+                if neighbor in closed_set:
+                    continue
 
-                        if (next_cell not in cost_so_far or
-                                new_cost < cost_so_far[next_cell]):
-                            cost_so_far[next_cell] = new_cost
-                            priority = new_cost + self.heuristic(next_cell, target_grid)
-                            heapq.heappush(frontier, (priority, next_cell))
-                            came_from[next_cell] = current
+                # Calculate heuristic if not already in open set
+                if neighbor not in open_set:
+                    neighbor.h_cost = self.heuristic(neighbor, goal_node)
+                    neighbor.parent = current
+                    open_set.add(neighbor)
+                else:
+                    # Check if this path is better than previous
+                    if neighbor.g_cost > current.g_cost + 1:
+                        neighbor.g_cost = current.g_cost + 1
+                        neighbor.parent = current
 
-        # Reconstruct path
-        if target_grid not in came_from:
-            print("No path found to target!")
-            return None
+        return []  # No path found
 
+    def _reconstruct_path(self, goal_node: Node) -> List[Tuple[float, float]]:
+        """Reconstruct path from goal node back to start"""
         path = []
-        current = target_grid
+        current = goal_node
+
         while current is not None:
-            path.append(current)
-            current = came_from.get(current)
-        path.reverse()
+            # Convert grid coordinates back to world coordinates
+            world_x, world_y = self.world_map.grid_to_world(current.x, current.y)
+            path.append((world_x, world_y))
+            current = current.parent
 
-        return path
+        return list(reversed(path))
 
-    def get_turn_angle(self, current_heading: float, target_heading: float) -> float:
-        """Calculate the smallest turning angle between current and target heading"""
-        angle_diff = target_heading - current_heading
-        # Normalize to -180 to 180
-        angle_diff = (angle_diff + 180) % 360 - 180
-        return angle_diff
-
-    async def execute_path(self, path: List[Tuple[int, int]]) -> bool:
-        """Execute the path by controlling the Picarx"""
-        if not path or len(path) < 2:
-            return False
-
-        for i in range(len(path) - 1):
-            # Check for obstacles before each movement
-            if await self.check_for_obstacles():
-                print("Obstacle detected during path execution!")
-                self.px.forward(0)  # Stop movement
-                return False
-
-            current = path[i]
-            next_point = path[i + 1]
-
-            # Get direction and required heading
-            direction = self.get_grid_direction(current, next_point)
-            target_heading = self.direction_to_angle(direction)
-
-            # Calculate turn angle
-            turn_angle = self.get_turn_angle(self.px.heading, target_heading)
-
-            # Execute turn if needed
-            if abs(turn_angle) > 5:  # 5-degree threshold
-                # Stop before turning
-                self.px.forward(0)
-                await self.px.turn_to_heading(target_heading)
-
-            # Move forward one grid space
-            self.px.forward(self.MOVEMENT_SPEED)
-            await asyncio.sleep(self.GRID_MOVE_TIME)
-
-        self.px.forward(0)
-        return True  # Path completed successfully
+    def is_near_target(self, current_x: float, current_y: float,
+                       target_x: float, target_y: float) -> bool:
+        """Check if current position is within one grid space of target"""
+        distance = math.sqrt((current_x - target_x) ** 2 + (current_y - target_y) ** 2)
+        return distance <= self.world_map.resolution
