@@ -141,7 +141,7 @@ class AsyncObstacleAvoidance:
         self.px.set_dir_servo_angle(0)
         await asyncio.sleep(0.5)
         self.emergency_stop_flag = False
-        self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
+        # self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
 
     def find_best_direction(self):
         """Analyze scan data to find the best direction to move"""
