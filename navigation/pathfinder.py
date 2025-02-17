@@ -1,35 +1,35 @@
-import asyncio
 import heapq
-import numpy as np
 import math
 import time
-from dataclasses import dataclass, field
-from heapq import heappush, heappop
-from typing import List, Tuple, Optional, Set, Dict
 
-from picarx_wrapper import PicarXWrapper
-from world_map import WorldMap
+import numpy as np
+from typing import List, Tuple, Dict, Set
+import asyncio
+
 
 class Pathfinder:
     def __init__(self, world_map, picar):
         self.world_map = world_map
         self.picar = picar
-        self.path_rebuild_threshold = 20  # Rebuild path if more than 20cm from expected position
-        self.max_path_steps = 50  # Maximum number of steps before forcing a path rebuild
+        self.path = []
+        self.current_path_index = 0
+
+        # A* parameters
+        self.directions = [
+            (-1, -1), (-1, 0), (-1, 1),
+            (0, -1), (0, 1),
+            (1, -1), (1, 0), (1, 1)
+        ]
 
     def heuristic(self, a: Tuple[int, int], b: Tuple[int, int]) -> float:
         """Manhattan distance heuristic"""
         return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
     def get_neighbors(self, pos: Tuple[int, int]) -> List[Tuple[int, int]]:
-        """Get valid neighboring grid cells"""
-        x, y = pos
+        """Get valid neighboring cells"""
         neighbors = []
-
-        # Check 8 surrounding cells
-        for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0),
-                       (1, 1), (1, -1), (-1, 1), (-1, -1)]:
-            new_x, new_y = x + dx, y + dy
+        for dx, dy in self.directions:
+            new_x, new_y = pos[0] + dx, pos[1] + dy
 
             # Check bounds
             if (0 <= new_x < self.world_map.grid_size and
@@ -43,35 +43,27 @@ class Pathfinder:
 
     def find_path(self, start_x: float, start_y: float,
                   goal_x: float, goal_y: float) -> List[Tuple[float, float]]:
-        """Find path from start to goal in world coordinates"""
+        """Find path from start to goal using A* algorithm"""
         # Convert world coordinates to grid coordinates
         start_grid = self.world_map.world_to_grid(start_x, start_y)
         goal_grid = self.world_map.world_to_grid(goal_x, goal_y)
 
-        # Initialize data structures for A*
+        # Initialize data structures
         frontier = []
         heapq.heappush(frontier, (0, start_grid))
         came_from = {start_grid: None}
         cost_so_far = {start_grid: 0}
 
-        found_path = False
-
         while frontier:
             current = heapq.heappop(frontier)[1]
 
             if current == goal_grid:
-                found_path = True
                 break
 
             for next_pos in self.get_neighbors(current):
-                # Calculate movement cost (diagonal moves cost more)
-                dx = abs(next_pos[0] - current[0])
-                dy = abs(next_pos[1] - current[1])
-                if dx == 1 and dy == 1:
-                    movement_cost = 1.4  # √2 for diagonal
-                else:
-                    movement_cost = 1.0
-
+                # Calculate movement cost (diagonal movements cost more)
+                dx, dy = next_pos[0] - current[0], next_pos[1] - current[1]
+                movement_cost = math.sqrt(dx * dx + dy * dy)
                 new_cost = cost_so_far[current] + movement_cost
 
                 if next_pos not in cost_so_far or new_cost < cost_so_far[next_pos]:
@@ -79,9 +71,6 @@ class Pathfinder:
                     priority = new_cost + self.heuristic(goal_grid, next_pos)
                     heapq.heappush(frontier, (priority, next_pos))
                     came_from[next_pos] = current
-
-        if not found_path:
-            return []
 
         # Reconstruct path
         current = goal_grid
@@ -91,123 +80,112 @@ class Pathfinder:
             # Convert grid coordinates back to world coordinates
             world_coords = self.world_map.grid_to_world(current[0], current[1])
             path.append(world_coords)
-            current = came_from[current]
+            current = came_from.get(current)
 
         path.reverse()
         return path
 
-    def check_path_validity(self, current_pos: Dict, path: List[Tuple[float, float]]) -> bool:
-        """Check if current path is still valid"""
+    def get_steering_angle(self, current_pos: Dict, target_pos: Tuple[float, float]) -> float:
+        """Calculate steering angle to next waypoint"""
+        dx = target_pos[0] - current_pos['x']
+        dy = target_pos[1] - current_pos['y']
+
+        # Calculate target angle in degrees
+        target_angle = math.degrees(math.atan2(dy, dx))
+
+        # Calculate angle difference
+        angle_diff = target_angle - current_pos['heading']
+        # Normalize to -180 to 180
+        angle_diff = (angle_diff + 180) % 360 - 180
+
+        # Convert to steering angle
+        steering_angle = (angle_diff / 45.0) * 30  # 30 is max steering angle
+        return max(-30, min(30, steering_angle))
+
+    async def follow_path(self, path: List[Tuple[float, float]],
+                          emergency_stop_flag: bool,
+                          current_maneuver: asyncio.Task) -> bool:
+        """Follow calculated path while avoiding obstacles"""
         if not path:
             return False
 
-        # Get current position
-        current_x = current_pos['x']
-        current_y = current_pos['y']
+        self.path = path
+        self.current_path_index = 0
 
-        # Find closest point on path
-        min_dist = float('inf')
-        closest_idx = 0
+        while self.current_path_index < len(self.path):
+            # Check for emergency stop or ongoing maneuver
+            if emergency_stop_flag or current_maneuver:
+                return False
 
-        for i, (path_x, path_y) in enumerate(path):
-            dist = math.sqrt((current_x - path_x) ** 2 + (current_y - path_y) ** 2)
-            if dist < min_dist:
-                min_dist = dist
-                closest_idx = i
+            current_pos = self.picar.get_position()
+            target = self.path[self.current_path_index]
 
-        # If we're too far from path, it's invalid
-        if min_dist > self.path_rebuild_threshold:
-            return False
+            # Calculate distance to current waypoint
+            dx = target[0] - current_pos['x']
+            dy = target[1] - current_pos['y']
+            distance = math.sqrt(dx * dx + dy * dy)
 
-        # Check if any new obstacles block the remaining path
-        for i in range(closest_idx, len(path) - 1):
-            x1, y1 = path[i]
-            x2, y2 = path[i + 1]
+            # If close enough to waypoint, move to next one
+            if distance < 5:  # 5cm threshold
+                self.current_path_index += 1
+                continue
 
-            # Convert to grid coordinates
-            grid_x1, grid_y1 = self.world_map.world_to_grid(x1, y1)
-            grid_x2, grid_y2 = self.world_map.world_to_grid(x2, y2)
+            # Calculate and set steering angle
+            steering_angle = self.get_steering_angle(current_pos, target)
+            self.picar.set_dir_servo_angle(steering_angle)
 
-            # Check for obstacles along this path segment
-            points = self.get_line_points(grid_x1, grid_y1, grid_x2, grid_y2)
-            for gx, gy in points:
-                if (0 <= gx < self.world_map.grid_size and
-                        0 <= gy < self.world_map.grid_size and
-                        self.world_map.grid[gy, gx] != 0):
-                    return False
+            # Adjust speed based on turn sharpness
+            speed = 30 * (1 - abs(steering_angle) / 60)  # Reduce speed in turns
+            self.picar.forward(speed)
 
+            await asyncio.sleep(0.1)
+
+        self.picar.stop()
         return True
 
-    def get_line_points(self, x1: int, y1: int, x2: int, y2: int) -> List[Tuple[int, int]]:
-        """Get all grid points along a line using Bresenham's algorithm"""
-        points = []
-        dx = abs(x2 - x1)
-        dy = abs(y2 - y1)
-        x, y = x1, y1
+    async def navigate_to_goal(self, goal_x: float, goal_y: float,
+                               emergency_stop_flag: bool,
+                               current_maneuver: asyncio.Task,
+                               replanning_interval: float = 2.0) -> bool:
+        """Navigate to goal with periodic replanning"""
+        last_planning_time = 0
 
-        sx = 1 if x2 > x1 else -1
-        sy = 1 if y2 > y1 else -1
+        while True:
+            current_time = time.time()
+            current_pos = self.picar.get_position()
 
-        if dx > dy:
-            err = dx / 2
-            while x != x2:
-                points.append((x, y))
-                err -= dy
-                if err < 0:
-                    y += sy
-                    err += dx
-                x += sx
-        else:
-            err = dy / 2
-            while y != y2:
-                points.append((x, y))
-                err -= dx
-                if err < 0:
-                    x += sx
-                    err += dy
-                y += sy
+            # Check if we've reached the goal
+            dx = goal_x - current_pos['x']
+            dy = goal_y - current_pos['y']
+            if math.sqrt(dx * dx + dy * dy) < 5:
+                self.picar.stop()
+                return True
 
-        points.append((x, y))
-        return points
+            # Replan path periodically or if no current path
+            if (current_time - last_planning_time > replanning_interval or
+                    not self.path):
+                self.path = self.find_path(
+                    current_pos['x'], current_pos['y'],
+                    goal_x, goal_y
+                )
+                last_planning_time = current_time
+                self.current_path_index = 0
 
-    def get_next_waypoint(self, current_pos: Dict, path: List[Tuple[float, float]],
-                          lookahead_distance: float = 20.0) -> Tuple[float, float]:
-        """Get next waypoint along path within lookahead distance"""
-        if not path:
-            return None
+                if not self.path:
+                    print("No valid path found!")
+                    self.picar.stop()
+                    return False
 
-        current_x = current_pos['x']
-        current_y = current_pos['y']
+            # Follow current path
+            path_complete = await self.follow_path(
+                self.path[self.current_path_index:],
+                emergency_stop_flag,
+                current_maneuver
+            )
 
-        # Find closest point on path
-        min_dist = float('inf')
-        closest_idx = 0
+            if not path_complete:
+                # Path following was interrupted
+                await asyncio.sleep(0.5)  # Wait for obstacle avoidance to complete
+                continue
 
-        for i, (path_x, path_y) in enumerate(path):
-            dist = math.sqrt((current_x - path_x) ** 2 + (current_y - path_y) ** 2)
-            if dist < min_dist:
-                min_dist = dist
-                closest_idx = i
-
-        # Look ahead along path
-        cumulative_dist = 0
-        target_idx = closest_idx
-
-        for i in range(closest_idx, len(path) - 1):
-            x1, y1 = path[i]
-            x2, y2 = path[i + 1]
-            segment_dist = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
-
-            if cumulative_dist + segment_dist > lookahead_distance:
-                # Interpolate point along this segment
-                remaining_dist = lookahead_distance - cumulative_dist
-                fraction = remaining_dist / segment_dist
-                target_x = x1 + fraction * (x2 - x1)
-                target_y = y1 + fraction * (y2 - y1)
-                return (target_x, target_y)
-
-            cumulative_dist += segment_dist
-            target_idx = i + 1
-
-        # If we reach end of path, return final point
-        return path[-1]
+            await asyncio.sleep(0.1)

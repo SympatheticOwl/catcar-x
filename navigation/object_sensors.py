@@ -54,6 +54,10 @@ class AsyncObstacleAvoidance:
         self.current_path = []
         self.current_path_index = 0
 
+        self.goal_x = None
+        self.goal_y = None
+        self.navigation_active = False
+
     def _update_ultrasonic_detection(self, distance: float):
         """Update map with obstacle detected by ultrasonic sensor"""
         if not (0 < distance < 300):  # Ignore invalid readings
@@ -268,6 +272,24 @@ class AsyncObstacleAvoidance:
                         self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
 
             await asyncio.sleep(0.1)
+
+    async def navigate_to_coordinates(self, x: float, y: float):
+        """Start navigation to specified coordinates"""
+        self.goal_x = x
+        self.goal_y = y
+        self.navigation_active = True
+
+        # Start navigation task
+        if self.navigation_task:
+            self.navigation_task.cancel()
+
+        self.navigation_task = asyncio.create_task(
+            self.pathfinder.navigate_to_goal(
+                x, y,
+                self.emergency_stop_flag,
+                self.current_maneuver
+            )
+        )
 
     async def navigate_to_goal(self, goal_x: float, goal_y: float):
         """Navigate to goal point using A* pathfinding"""
