@@ -23,7 +23,7 @@ class AsyncObstacleAvoidance:
         self.CAMERA_OFFSET_Y = 0.0  # cm sideways
 
         # configuration parameters
-        self.min_distance = 15
+        self.min_distance = 25
         self.backup_time = 1.0
         self.long_backup_time = 2.0
         self.turn_time = 1.5
