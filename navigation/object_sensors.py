@@ -242,29 +242,46 @@ class AsyncObstacleAvoidance:
         self.is_navigating = True
         self.navigation_target = (target_x, target_y)
 
+        print(f"\nStarting navigation to target ({target_x}, {target_y})")
+
         try:
             while self.is_navigating:
                 current_pos = self.px.get_position()
+                print(f"\nCurrent position: ({current_pos['x']:.1f}, {current_pos['y']:.1f}), " +
+                      f"heading: {current_pos['heading']:.1f}°")
 
                 # Check if we've reached the target
                 dist_to_target = math.sqrt(
                     (target_x - current_pos['x']) ** 2 +
                     (target_y - current_pos['y']) ** 2
                 )
+                print(f"Distance to target: {dist_to_target:.1f} cm")
+
                 if dist_to_target < 20:  # Within 20cm
                     print("Reached target!")
                     self.px.stop()
                     self.is_navigating = False
                     return True
 
-                # Plan or update path
-                if (not self.current_path or
-                        self.current_distance < self.min_distance or  # Obstacle detected
-                        not self.pathfinder.is_path_clear(self.current_path)):  # Path blocked
+                # Check if we need to replan path
+                need_replan = False
 
-                    print("Planning new path...")
+                if not self.current_path:
+                    print("No current path - planning required")
+                    need_replan = True
+                elif self.current_distance < self.min_distance:
+                    print(f"Obstacle detected at {self.current_distance:.1f} cm - replanning required")
+                    need_replan = True
+                elif not self.pathfinder.is_path_clear(self.current_path):
+                    print("Current path blocked - replanning required")
+                    need_replan = True
+
+                # Plan or update path
+                if need_replan:
+                    print("\nPlanning new path...")
                     # Scan environment if obstacle detected
                     if self.current_distance < self.min_distance:
+                        print("Scanning environment...")
                         await self.scan_environment()
                         self.world_map.add_padding()
 
@@ -275,18 +292,21 @@ class AsyncObstacleAvoidance:
                     )
 
                     if not self.current_path:
-                        print("No valid path found!")
+                        print("No valid path found - stopping navigation")
                         self.px.stop()
                         self.is_navigating = False
                         return False
 
-                    # Smooth path
+                    print("Smoothing path...")
                     self.current_path = self.pathfinder.smooth_path(self.current_path)
                     self.current_path_index = 0
+                    print(f"New path created with {len(self.current_path)} waypoints")
 
                 # Follow current path
                 if self.current_path_index < len(self.current_path):
                     next_x, next_y = self.current_path[self.current_path_index]
+                    print(f"\nMoving to waypoint {self.current_path_index + 1}/{len(self.current_path)}: " +
+                          f"({next_x:.1f}, {next_y:.1f})")
 
                     # Calculate heading to next waypoint
                     target_heading = self.px.get_target_heading(next_x, next_y)
@@ -294,12 +314,18 @@ class AsyncObstacleAvoidance:
                     # Normalize to -180 to 180
                     angle_diff = (angle_diff + 180) % 360 - 180
 
+                    print(f"Target heading: {target_heading:.1f}°, " +
+                          f"current heading: {current_pos['heading']:.1f}°, " +
+                          f"difference: {angle_diff:.1f}°")
+
                     # Set steering and speed
                     steering_angle = self.px.calculate_steering_angle(angle_diff)
                     self.px.set_dir_servo_angle(steering_angle)
 
                     # Adjust speed based on turn sharpness
                     speed = self.speed * (1 - abs(steering_angle) / self.px.MAX_STEERING_ANGLE * 0.5)
+                    print(f"Steering angle: {steering_angle:.1f}°, adjusted speed: {speed:.1f}")
+
                     self.px.forward(speed)
                     self.is_moving = True
 
@@ -308,7 +334,10 @@ class AsyncObstacleAvoidance:
                         (next_x - current_pos['x']) ** 2 +
                         (next_y - current_pos['y']) ** 2
                     )
+                    print(f"Distance to waypoint: {dist_to_waypoint:.1f} cm")
+
                     if dist_to_waypoint < 20:  # Within 20cm
+                        print(f"Reached waypoint {self.current_path_index + 1}")
                         self.current_path_index += 1
 
                 await asyncio.sleep(0.1)
@@ -322,7 +351,6 @@ class AsyncObstacleAvoidance:
             print(f"Navigation error: {e}")
             self.px.stop()
             self.is_navigating = False
-            raise
 
     async def run(self):
         print("Starting enhanced obstacle avoidance program...")
