@@ -99,24 +99,6 @@ class AsyncObstacleAvoidance:
         self.px.set_cam_pan_angle(0)
         return scan_data
 
-    async def old_scan_environment(self):
-        """Perform a sensor sweep and return scan data"""
-        scan_data = []
-        start_angle, end_angle = self.scan_range
-
-        for angle in range(start_angle, end_angle + 1, self.scan_step):
-            self.px.set_cam_pan_angle(angle)
-            await asyncio.sleep(0.1)
-
-            distances = await self.scan_avg()
-
-            if distances:
-                avg_dist = sum(distances) / len(distances)
-                scan_data.append((angle, avg_dist))
-
-        self.px.set_cam_pan_angle(0)
-        return scan_data
-
     def _polar_to_cartesian(self, angle_deg, distance):
         """Convert polar coordinates to cartesian"""
         angle_rad = math.radians(angle_deg)
@@ -263,60 +245,44 @@ class AsyncObstacleAvoidance:
 
             await asyncio.sleep(0.1)
 
+    async def navigate_to_point(self, target_x, target_y, speed=30):
+        """Navigate to a target point while accounting for turning radius"""
+        while True:
+            # Calculate distance and angle to target
+            dx = target_x - self.px.x
+            dy = target_y - self.px.y
+            print(f'self.x: {self.px.x}, self.y: {self.px.y}')
+            print(f'target.x: {self.px.x}, target.y: {self.px.y}')
+            distance_to_target = math.sqrt(dx ** 2 + dy ** 2)
 
+            # If we're close enough to target, stop
+            if distance_to_target < 5:  # 5cm threshold
+                self.px.stop()
+                return True
 
-    async def navigate_to_point(self, target_x, target_y):
-        """Navigate to a target point using A* pathfinding"""
-        # Get current position and convert to grid coordinates
-        curr_pos = self.px.get_position()
-        start = self.world_map.world_to_grid(curr_pos['x'], curr_pos['y'])
+            # Calculate target angle in degrees
+            target_angle = math.degrees(math.atan2(dy, dx))
 
-        # Convert target to grid coordinates
-        end = self.world_map.world_to_grid(target_x, target_y)
+            # Calculate angle difference
+            angle_diff = target_angle - self.px.heading
+            # Normalize to -180 to 180
+            angle_diff = (angle_diff + 180) % 360 - 180
 
-        path = self.pathfinder.astar(start, end)
+            # If we need to turn more than 45 degrees, stop and turn first
+            if abs(angle_diff) > 45:
+                self.px.stop()
+                await self.px.turn_to_heading(target_angle)
+                continue
 
-        if path is None:
-            print("No path found to target!")
-            return
+            # Calculate steering angle based on angle difference
+            steering_angle = self.px.calculate_steering_angle(angle_diff)
+            self.px.set_dir_servo_angle(steering_angle)
 
-        print(f"Found path to target: {path}")
+            # Adjust speed based on turn sharpness
+            adjusted_speed = speed * (1 - abs(steering_angle) / (2 * self.px.MAX_STEERING_ANGLE))
+            self.px.forward(adjusted_speed)
 
-        for point in path:
-            # Convert grid point to world coordinates
-            x, y = self.world_map.grid_to_world(point[0], point[1])
-
-            # Calculate heading to next point
-            target_heading = self.px.get_target_heading(x, y)
-
-            # Turn to face next point
-            await self.px.turn_to_heading(target_heading)
-
-            while True:
-                # Move towards point
-                self.px.forward(self.speed)
-
-                # Check for obstacles while moving
-                await self.px.scan_environment()
-                self.world_map.add_padding()
-
-                # Recalculate path if needed
-                if self.world_map.grid[point[1], point[0]] != 0:
-                    print("Obstacle detected on path! Recalculating...")
-                    self.px.stop()
-                    break  # Break out of inner loop to recalculate
-
-                # Check if we've reached the point
-                curr_pos = self.px.get_position()
-                curr_x, curr_y = self.world_map.world_to_grid(curr_pos['x'], curr_pos['y'])
-
-                if curr_x == point[0] and curr_y == point[1]:
-                    print(f"Reached intermediate point: {point}")
-                    self.px.stop()
-                    break
-
-        print("Reached target!")
-        self.px.stop()
+            await asyncio.sleep(0.1)
 
     async def run(self):
         print("Starting enhanced obstacle avoidance program...")
