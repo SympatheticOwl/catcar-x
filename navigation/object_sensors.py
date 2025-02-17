@@ -244,6 +244,22 @@ class AsyncObstacleAvoidance:
                             if obj['label'] == "stop sign":
                                 print("STOP!!!!")
                                 self.vision_clear = False
+                                await asyncio.sleep(3)
+                            if obj['label'] == "cat" or obj['label'] == "person":
+                                print("DON'T HURT THE CAT!!!!")
+                                self.vision_clear = False
+                                await self.emergency_stop()
+                                self.emergency_stop_flag = True
+                                # cancel any ongoing maneuver except backup
+                                if self.current_maneuver:
+                                    self.current_maneuver.cancel()
+
+                                self.is_moving = False
+                                self.px.forward(0)
+                                self.px.set_dir_servo_angle(0)
+                                await asyncio.sleep(0.5)
+                            else:
+                                self.emergency_stop_flag = False
 
                 if (self.current_distance >= self.min_distance and not self.is_cliff):
                     if not self.is_moving:
