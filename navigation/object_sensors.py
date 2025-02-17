@@ -236,7 +236,7 @@ class AsyncObstacleAvoidance:
             # add padding once scanning is done
             # self.world_map.add_padding()
 
-            best_angle, max_distance = self.find_best_direction()
+            best_angle, max_distance = self.find_best_direction(self.map)
 
             # normal evasive maneuver
             print("Backing up...")
