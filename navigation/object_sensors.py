@@ -271,50 +271,58 @@ class AsyncObstacleAvoidance:
 
     async def navigate_to_target(self, target_x: float, target_y: float):
         """Navigate to target coordinates using A* pathfinding"""
-        print(f"Starting navigation to target ({target_x}, {target_y})")
+        print(f"\nNavigating to target: ({target_x}, {target_y})")
+        self.is_navigating = True
 
-        while True:
+        while self.is_navigating:
             # Get current position
             current_pos = self.px.get_position()
             current_x = current_pos['x']
             current_y = current_pos['y']
 
-            # Check if we've reached the target
+            # Check if we're close enough to target
             distance_to_target = math.sqrt(
                 (target_x - current_x) ** 2 +
                 (target_y - current_y) ** 2
             )
-            if distance_to_target < self.world_map.resolution:
+
+            if distance_to_target <= self.world_map.resolution:
                 print("Reached target!")
-                self.px.stop()
-                break
+                self.is_navigating = False
+                self.px.forward(0)
+                return True
 
             # Find path to target
-            path = self.pathfinder.find_path(
-                (current_x, current_y),
-                (target_x, target_y)
+            path = await self.pathfinder.find_path(
+                current_x, current_y,
+                target_x, target_y
             )
 
             if not path:
-                print("No valid path found!")
-                self.px.stop()
-                break
+                print("No path found to target!")
+                self.is_navigating = False
+                return False
 
-            print(f"Found path with {len(path)} waypoints")
+            print(f"Found path: {path}")
+            self.current_path = path
+            self.current_path_index = 0
 
             # Execute path
             success = await self.pathfinder.execute_path(path)
 
-            # If path execution failed (obstacle detected)
             if not success:
-                print("Obstacle detected! Rescanning environment...")
-                # Scan environment to update map
+                print("Path execution interrupted - scanning environment...")
+                # Scan environment for new obstacles
                 await self.scan_environment()
-                # Add padding around detected obstacles
+                # Add padding to detected obstacles
                 self.world_map.add_padding()
-                continue
+                # Path will be recalculated on next loop iteration
+                await asyncio.sleep(0.5)
+            else:
+                self.is_navigating = False
+                return True
 
-            await asyncio.sleep(0.1)
+        return False
 
     async def run(self):
         print("Starting enhanced obstacle avoidance program...")
