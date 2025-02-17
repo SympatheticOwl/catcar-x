@@ -293,7 +293,7 @@ class AsyncObstacleAvoidance:
                     return False
 
             # Scan environment and update world map
-            if self.emergency_stop_flag or self.current_distance < self.min_distance or not self.vision_clear:
+            if self.current_maneuver and self.emergency_stop_flag or self.current_distance < self.min_distance or not self.vision_clear:
                 print("Obstacle detected! Updating world map...")
                 await self.current_maneuver
                 print("current_maneuver done...")
