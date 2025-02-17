@@ -18,7 +18,7 @@ class AsyncObstacleAvoidance:
         self.sensor_read_freq = 0.05
 
         # Add padding configuration
-        self.padding_size = 2  # Number of cells to pad around obstacles
+        self.padding_size = 3  # Number of cells to pad around obstacles
         self.padding_structure = np.ones((3, 3))  # 3x3 structuring element for dilation
 
         # state management
