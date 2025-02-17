@@ -281,7 +281,7 @@ class AsyncObstacleAvoidance:
             # Get current path or calculate new one
             if not self.pathfinder.current_path:
                 print("Calculating initial path...")
-                path = self.pathfinder.find_path(
+                path = await self.pathfinder.find_path(
                     current_x, current_y,
                     target_x, target_y
                 )
@@ -313,7 +313,7 @@ class AsyncObstacleAvoidance:
 
                 # Recalculate path with increased padding
                 self.world_map.padding_size = 2  # Temporarily increase padding
-                path = self.pathfinder.update_path(
+                path = await self.pathfinder.update_path(
                     current_x, current_y,
                     target_x, target_y
                 )
@@ -325,7 +325,7 @@ class AsyncObstacleAvoidance:
                     for offset in [(30, 0), (-30, 0), (0, 30), (0, -30)]:
                         alt_target_x = target_x + offset[0]
                         alt_target_y = target_y + offset[1]
-                        path = self.pathfinder.update_path(
+                        path = await self.pathfinder.update_path(
                             current_x, current_y,
                             alt_target_x, alt_target_y
                         )

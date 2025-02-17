@@ -2,6 +2,7 @@ import numpy as np
 from typing import List, Tuple, Set, Dict
 import math
 import heapq
+import asyncio
 
 
 class Pathfinder:
@@ -28,7 +29,7 @@ class Pathfinder:
         dy = abs(start[1] - goal[1])
         return max(dx, dy) + (math.sqrt(2) - 1) * min(dx, dy)
 
-    def get_valid_neighbors(self, node: Tuple[int, int]) -> List[Tuple[int, int]]:
+    async def get_valid_neighbors(self, node: Tuple[int, int]) -> List[Tuple[int, int]]:
         """Get valid neighboring cells that aren't obstacles, with safety margin"""
         neighbors = []
         x, y = node
@@ -62,6 +63,7 @@ class Pathfinder:
                     else:
                         neighbors.append((new_x, new_y))
 
+        await asyncio.sleep(0)  # Yield to other tasks occasionally
         return neighbors
 
     def movement_cost(self, current: Tuple[int, int], next: Tuple[int, int]) -> float:
@@ -75,7 +77,7 @@ class Pathfinder:
         # Straight movement
         return self.STRAIGHT_COST
 
-    def find_path(self, start_x: float, start_y: float,
+    async def find_path(self, start_x: float, start_y: float,
                         goal_x: float, goal_y: float) -> List[Tuple[float, float]]:
         """Find path from start to goal using A* algorithm"""
         # Convert world coordinates to grid coordinates
@@ -94,7 +96,8 @@ class Pathfinder:
             if current == goal_grid:
                 break
 
-            for next_node in self.get_valid_neighbors(current):
+            neighbors = await self.get_valid_neighbors(current)
+            for next_node in neighbors:
                 new_cost = cost_so_far[current] + self.movement_cost(current, next_node)
 
                 if next_node not in cost_so_far or new_cost < cost_so_far[next_node]:
@@ -102,6 +105,10 @@ class Pathfinder:
                     priority = new_cost + self.heuristic(next_node, goal_grid)
                     heapq.heappush(frontier, (priority, next_node))
                     came_from[next_node] = current
+
+            # Yield to other tasks periodically
+            if len(frontier) % 10 == 0:
+                await asyncio.sleep(0)
 
         # Reconstruct path
         path_grid = []
@@ -125,7 +132,7 @@ class Pathfinder:
         self.current_path = path_world
         return path_world
 
-    def smooth_path(self, path: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+    async def smooth_path(self, path: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
         """Smooth the path to make it more suitable for car movement"""
         if len(path) <= 2:
             return path
@@ -138,15 +145,19 @@ class Pathfinder:
 
             # Look ahead to find longest straight-line segment possible
             for j in range(len(path) - 1, i, -1):
-                if self.is_clear_path(current, path[j]):
+                if await self.is_clear_path(current, path[j]):
                     smoothed.append(path[j])
                     i = j
                     break
             i += 1
 
+            # Yield to other tasks periodically
+            if i % 5 == 0:
+                await asyncio.sleep(0)
+
         return smoothed
 
-    def is_clear_path(self, start: Tuple[float, float], end: Tuple[float, float]) -> bool:
+    async def is_clear_path(self, start: Tuple[float, float], end: Tuple[float, float]) -> bool:
         """Check if there's a clear straight-line path between two points"""
         start_grid = self.world_map.world_to_grid(start[0], start[1])
         end_grid = self.world_map.world_to_grid(end[0], end[1])
@@ -177,12 +188,16 @@ class Pathfinder:
                 err += dx
                 y += sy
 
+            # Yield periodically during long path checks
+            if (abs(x - x0) + abs(y - y0)) % 10 == 0:
+                await asyncio.sleep(0)
+
         return True
 
-    def update_path(self, current_x: float, current_y: float,
-                    goal_x: float, goal_y: float) -> List[Tuple[float, float]]:
+    async def update_path(self, current_x: float, current_y: float,
+                          goal_x: float, goal_y: float) -> List[Tuple[float, float]]:
         """Update path based on current position and world state"""
-        new_path = self.find_path(current_x, current_y, goal_x, goal_y)
+        new_path = await self.find_path(current_x, current_y, goal_x, goal_y)
         if new_path:
-            new_path = self.smooth_path(new_path)
+            new_path = await self.smooth_path(new_path)
         return new_path
