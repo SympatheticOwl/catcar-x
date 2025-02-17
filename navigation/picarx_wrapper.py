@@ -23,7 +23,7 @@ class PicarXWrapper:
         self.WHEEL_DIAMETER = 6.5  # cm
         self.WHEEL_CIRCUMFERENCE = math.pi * self.WHEEL_DIAMETER
         self.WHEELBASE = 9.7  # Distance between wheels in cm
-        self.MAX_STEERING_ANGLE = 28  # Maximum steering angle in degrees
+        self.MAX_STEERING_ANGLE = 30  # Maximum steering angle in degrees
 
         # Movement constants
         self.MAX_MOTOR_SPEED = 100  # Maximum motor speed value
