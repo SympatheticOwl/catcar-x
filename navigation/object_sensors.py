@@ -296,7 +296,7 @@ class AsyncObstacleAvoidance:
             await asyncio.sleep(self.pathfinder.GRID_MOVE_TIME)
 
             # Check for obstacles after each movement
-            if self.px.current_distance < self.world_map.resolution:
+            if self.current_distance < self.world_map.resolution:
                 self.px.forward(0)
                 return False  # Path blocked
 
