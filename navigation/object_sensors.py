@@ -300,8 +300,8 @@ class AsyncObstacleAvoidance:
             tasks = [pos_track_task, vision_task, ultrasonic_task, cliff_task, navigation_task]
 
             await self.navigate_to_point(100, 50)  # Navigate to point 1m ahead
-
-            await asyncio.gather(navigation_task)
+            for task in tasks:
+                task.cancel()
         except asyncio.CancelledError:
             print("\nShutting down gracefully...")
         finally:
