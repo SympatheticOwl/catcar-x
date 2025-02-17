@@ -22,28 +22,38 @@ class Pathfinder:
             (1, -1), (1, 0), (1, 1)
         ]
 
+        # Store grid properties from world map
+        self.grid_size = self.world_map.grid_size
+        self.resolution = self.world_map.resolution
+        self.origin = self.world_map.origin
 
     def heuristic(self, a: Tuple[int, int], b: Tuple[int, int]) -> float:
-        """Calculate heuristic (euclidean distance) between two points"""
-        return math.sqrt((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2)
-
+        """Calculate heuristic (euclidean distance) between two grid points"""
+        # Convert grid distances to world distances for more accurate heuristic
+        ax, ay = self.world_map.grid_to_world(a[0], a[1])
+        bx, by = self.world_map.grid_to_world(b[0], b[1])
+        return math.sqrt((bx - ax) ** 2 + (by - ay) ** 2)
 
     def get_neighbors(self, pos: Tuple[int, int]) -> List[Tuple[int, int]]:
         """Get valid neighboring grid cells"""
         neighbors = []
-        for dx, dy in self.directions:
-            new_x, new_y = pos[0] + dx, pos[1] + dy
+        x, y = pos
 
-            # Check bounds
-            if (0 <= new_x < self.world_map.grid_size and
-                    0 <= new_y < self.world_map.grid_size):
+        for dx, dy in self.directions:
+            new_x, new_y = x + dx, y + dy
+
+            # Check if within grid bounds
+            if (0 <= new_x < self.grid_size and
+                    0 <= new_y < self.grid_size):
 
                 # Check if cell is obstacle-free
                 if self.world_map.grid[new_y, new_x] == 0:
-                    neighbors.append((new_x, new_y))
+                    # Add valid neighbor with its movement cost
+                    # Diagonal movements cost more
+                    cost = math.sqrt(2) if dx != 0 and dy != 0 else 1
+                    neighbors.append((new_x, new_y, cost))
 
         return neighbors
-
 
     def find_path(self, start_x: float, start_y: float,
                   goal_x: float, goal_y: float) -> List[Tuple[float, float]]:
@@ -51,6 +61,15 @@ class Pathfinder:
         # Convert world coordinates to grid coordinates
         start_grid = self.world_map.world_to_grid(start_x, start_y)
         goal_grid = self.world_map.world_to_grid(goal_x, goal_y)
+
+        print(f"Planning path from grid {start_grid} to {goal_grid}")
+        print(f"Grid size: {self.grid_size}x{self.grid_size}, Resolution: {self.resolution}cm")
+
+        # Verify start and goal are valid
+        if (self.world_map.grid[start_grid[1], start_grid[0]] != 0 or
+                self.world_map.grid[goal_grid[1], goal_grid[0]] != 0):
+            print("Start or goal position is in obstacle!")
+            return []
 
         # Initialize data structures
         frontier = []
@@ -67,11 +86,8 @@ class Pathfinder:
                 path_found = True
                 break
 
-            for next_pos in self.get_neighbors(current):
-                # Calculate movement cost (diagonal movements cost more)
-                dx, dy = next_pos[0] - current[0], next_pos[1] - current[1]
-                movement_cost = math.sqrt(dx * dx + dy * dy)
-                new_cost = cost_so_far[current] + movement_cost
+            for next_pos, movement_cost in [(n[:2], n[2]) for n in self.get_neighbors(current)]:
+                new_cost = cost_so_far[current] + (movement_cost * self.resolution)
 
                 if next_pos not in cost_so_far or new_cost < cost_so_far[next_pos]:
                     cost_so_far[next_pos] = new_cost
@@ -80,6 +96,7 @@ class Pathfinder:
                     came_from[next_pos] = current
 
         if not path_found:
+            print("No path found!")
             return []
 
         # Reconstruct path
@@ -96,8 +113,8 @@ class Pathfinder:
         # Smooth path by removing unnecessary waypoints
         smoothed_path = self.smooth_path(world_path)
 
+        print(f"Path found with {len(smoothed_path)} waypoints")
         return smoothed_path
-
 
     def smooth_path(self, path: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
         """Smooth path by removing unnecessary waypoints"""
@@ -122,10 +139,9 @@ class Pathfinder:
 
         return smoothed
 
-
     def is_clear_path(self, start: Tuple[float, float],
                       end: Tuple[float, float]) -> bool:
-        """Check if there's a clear path between two points"""
+        """Check if there's a clear path between two points in world coordinates"""
         # Convert to grid coordinates
         start_grid = self.world_map.world_to_grid(start[0], start[1])
         end_grid = self.world_map.world_to_grid(end[0], end[1])
@@ -143,7 +159,12 @@ class Pathfinder:
         dx *= 2
         dy *= 2
 
+        # Check each cell along the line
         for _ in range(n):
+            # Ensure we're within grid bounds
+            if not (0 <= x < self.grid_size and 0 <= y < self.grid_size):
+                return False
+
             if self.world_map.grid[y, x] != 0:
                 return False
 
@@ -155,7 +176,6 @@ class Pathfinder:
                 error += dx
 
         return True
-
 
     def get_heading_to_point(self, current_x: float, current_y: float,
                              target_x: float, target_y: float) -> float:
