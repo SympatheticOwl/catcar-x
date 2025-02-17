@@ -253,7 +253,8 @@ class AsyncObstacleAvoidance:
                 distance_to_target = math.sqrt(
                     (target_x - current_x) ** 2 + (target_y - current_y) ** 2
                 )
-                if distance_to_target < 10:  # Within 10cm
+                # Use a larger threshold since we're working with 40cm grid cells
+                if distance_to_target < self.world_map.resolution / 2:  # Within half a grid cell
                     print("Reached target!")
                     self.px.stop()
                     self.is_navigating = False
@@ -262,6 +263,9 @@ class AsyncObstacleAvoidance:
                 # Convert current and target positions to grid coordinates
                 current_grid = self.world_map.world_to_grid(current_x, current_y)
                 target_grid = self.world_map.world_to_grid(target_x, target_y)
+
+                print(f"Current grid position: {current_grid}")
+                print(f"Target grid position: {target_grid}")
 
                 # Find path to target
                 path = self.pathfinder.find_path(current_grid, target_grid)
@@ -275,6 +279,8 @@ class AsyncObstacleAvoidance:
                 path = self.pathfinder.post_process_path(path)
                 self.current_path = path
                 self.current_path_index = 0
+
+                print(f"Generated path: {path}")
 
                 # Follow path until interrupted or completed
                 while self.current_path_index < len(self.current_path):
@@ -314,16 +320,17 @@ class AsyncObstacleAvoidance:
                             (next_y - current_pos['y']) ** 2
                         )
 
-                        if distance < 10:  # Within 10cm of waypoint
+                        # Use half grid cell size as waypoint threshold
+                        if distance < self.world_map.resolution / 2:
+                            print(f"Reached waypoint {self.current_path_index}")
                             self.current_path_index += 1
                             break
 
                         # Check ultrasonic distance and update world map
                         if self.current_distance < self.min_distance and not self.is_backing_up:
-                            print("Obstacle detected by ultrasonic sensor")
-                            # Update world map with detected obstacle
-                            await self.scan_environment()  # This will update the world map
-                            # Emergency stop and recalculate path
+                            print(f"Obstacle detected by ultrasonic at {self.current_distance}cm")
+                            # Let the scan environment update the world map
+                            await self.scan_environment()
                             await self.emergency_stop()
                             break
 
@@ -341,9 +348,6 @@ class AsyncObstacleAvoidance:
                                 break
 
                         await asyncio.sleep(0.1)
-
-                # If we've completed the current path segment, continue to next iteration
-                # to generate new path from current position
 
         except asyncio.CancelledError:
             print("Navigation cancelled")
