@@ -327,7 +327,7 @@ class AsyncObstacleAvoidance:
                         (next_world_point[1] - current_pos['y']) ** 2
                     )
 
-                    if distance_to_waypoint > self.grid_size * 0.5:  # Half grid cell threshold
+                    if distance_to_waypoint > self.world_map.grid_size * 0.5:  # Half grid cell threshold
                         self.is_moving = True
                         self.px.forward(self.speed)
 
