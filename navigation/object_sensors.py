@@ -293,7 +293,7 @@ class AsyncObstacleAvoidance:
             vision_task = asyncio.create_task(self.vision.capture_and_detect())
             ultrasonic_task = asyncio.create_task(self.ultrasonic_monitoring())
             cliff_task = asyncio.create_task(self.cliff_monitoring())
-            navigation_task = asyncio.create_task(self.navigate_to_point(100, 50))
+            navigation_task = asyncio.create_task(self.navigate_to_point(100, 100))
 
             tasks = [
                 pos_track_task,
