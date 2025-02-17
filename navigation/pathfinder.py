@@ -117,37 +117,3 @@ class Pathfinder:
         # Normalize to -180 to 180
         angle_diff = (angle_diff + 180) % 360 - 180
         return angle_diff
-
-    async def execute_path(self, path: List[Tuple[int, int]]) -> bool:
-        """Execute the path by controlling the Picarx"""
-        if not path or len(path) < 2:
-            return False
-
-        for i in range(len(path) - 1):
-            current = path[i]
-            next_point = path[i + 1]
-
-            # Get direction and required heading
-            direction = self.get_grid_direction(current, next_point)
-            target_heading = self.direction_to_angle(direction)
-
-            # Calculate turn angle
-            turn_angle = self.get_turn_angle(self.px.heading, target_heading)
-
-            # Execute turn if needed
-            if abs(turn_angle) > 5:  # 5-degree threshold
-                # Stop before turning
-                self.px.forward(0)
-                await self.px.turn_to_heading(target_heading)
-
-            # Move forward one grid space
-            self.px.forward(self.MOVEMENT_SPEED)
-            await asyncio.sleep(self.GRID_MOVE_TIME)
-
-            # Check for obstacles after each movement
-            if self.px.current_distance < self.world_map.resolution:
-                self.px.forward(0)
-                return False  # Path blocked
-
-        self.px.forward(0)
-        return True  # Path completed successfully

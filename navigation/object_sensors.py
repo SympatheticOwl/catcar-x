@@ -269,6 +269,40 @@ class AsyncObstacleAvoidance:
 
             await asyncio.sleep(0.1)
 
+    async def execute_path(self, path: List[Tuple[int, int]]) -> bool:
+        """Execute the path by controlling the Picarx"""
+        if not path or len(path) < 2:
+            return False
+
+        for i in range(len(path) - 1):
+            current = path[i]
+            next_point = path[i + 1]
+
+            # Get direction and required heading
+            direction = self.pathfinder.get_grid_direction(current, next_point)
+            target_heading = self.pathfinder.direction_to_angle(direction)
+
+            # Calculate turn angle
+            turn_angle = self.pathfinder.get_turn_angle(self.px.heading, target_heading)
+
+            # Execute turn if needed
+            if abs(turn_angle) > 5:  # 5-degree threshold
+                # Stop before turning
+                self.px.forward(0)
+                await self.px.turn_to_heading(target_heading)
+
+            # Move forward one grid space
+            self.px.forward(self.pathfinder.MOVEMENT_SPEED)
+            await asyncio.sleep(self.pathfinder.GRID_MOVE_TIME)
+
+            # Check for obstacles after each movement
+            if self.px.current_distance < self.world_map.resolution:
+                self.px.forward(0)
+                return False  # Path blocked
+
+        self.px.forward(0)
+        return True  # Path completed successfully
+
     async def navigate_to_target(self, target_x: float, target_y: float):
         """Navigate to target coordinates using A* pathfinding"""
         print(f"\nNavigating to target: ({target_x}, {target_y})")
@@ -308,7 +342,7 @@ class AsyncObstacleAvoidance:
             self.current_path_index = 0
 
             # Execute path
-            success = await self.pathfinder.execute_path(path)
+            success = await self.execute_path(path)
 
             if not success:
                 print("Path execution interrupted - scanning environment...")
