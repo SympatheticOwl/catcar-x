@@ -295,7 +295,6 @@ class AsyncObstacleAvoidance:
                 print("Obstacle detected! Updating world map...")
                 self.px.stop()
                 await self.evasive_maneuver()
-                await self.scan_environment()
 
                 # Recalculate path
                 print("Recalculating path...")
