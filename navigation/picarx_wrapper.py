@@ -50,19 +50,29 @@ class PicarXWrapper:
 
                 if abs(self.current_steering_angle) > 1:  # If turning
                     # Calculate turn radius for current steering angle
-                    turn_radius = self.WHEELBASE / math.tan(math.radians(abs(self.current_steering_angle)))
+                    # Use a minimum turn radius to prevent unrealistic sharp turns
+                    turn_angle_rad = math.radians(abs(self.current_steering_angle))
+                    # Limit minimum turn radius to wheelbase
+                    turn_radius = max(
+                        self.WHEELBASE,
+                        self.WHEELBASE / math.tan(turn_angle_rad)
+                    )
 
                     # Calculate angular velocity (radians per second)
-                    angular_velocity = self.current_speed / turn_radius
+                    angular_velocity = (self.current_speed / turn_radius)
 
                     # Calculate angle turned in this time step
                     angle_turned = math.degrees(angular_velocity * dt)
                     if self.current_steering_angle < 0:
                         angle_turned = -angle_turned
 
-                    # Update heading
+                    # Update heading (limit rate of turn)
+                    max_turn_rate = 90 * dt  # max 90 degrees per second
+                    angle_turned = max(min(angle_turned, max_turn_rate), -max_turn_rate)
                     self.heading = (self.heading + angle_turned) % 360
-                    heading_rad = math.radians(self.heading - angle_turned / 2)  # Use average heading for arc
+
+                    # Use average heading for arc movement
+                    heading_rad = math.radians(self.heading - angle_turned / 2)
 
                     # Calculate arc movement
                     self.x += distance * math.cos(heading_rad)
@@ -74,7 +84,6 @@ class PicarXWrapper:
                     self.y += distance * math.sin(heading_rad)
 
             self.last_position_update = current_time
-            # await asyncio.sleep(0.05)  # Update at 20Hz
             await asyncio.sleep(0.05)  # Update at 20Hz
 
     def forward(self, speed):
@@ -103,7 +112,7 @@ class PicarXWrapper:
         self.px.set_dir_servo_angle(self.current_steering_angle)
 
     async def turn_to_heading(self, target_heading, speed=30):
-        """Turn to a specific heading"""
+        """Turn to a specific heading more smoothly"""
         # Normalize target heading to 0-360
         target_heading = target_heading % 360
 
@@ -119,15 +128,16 @@ class PicarXWrapper:
                 self.set_dir_servo_angle(0)
                 return True
 
-            # Set maximum steering in appropriate direction
-            steering_angle = math.copysign(self.MAX_STEERING_ANGLE, angle_diff)
-            self.set_dir_servo_angle(steering_angle)
+            # Calculate proportional steering angle
+            # Use smaller turns for smaller angle differences
+            turn_ratio = min(abs(angle_diff) / 90.0, 1.0)  # Scale based on how far we need to turn
+            max_turn = self.MAX_STEERING_ANGLE * turn_ratio
+            steering_angle = math.copysign(max_turn, angle_diff)
 
-            # Move at turning speed
-            if angle_diff > 0:
-                self.forward(speed)
-            else:
-                self.backward(speed)
+            # Set steering and move forward at reduced speed during turn
+            self.set_dir_servo_angle(steering_angle)
+            turn_speed = speed * (1 - abs(steering_angle) / self.MAX_STEERING_ANGLE)
+            self.forward(turn_speed)
 
             await asyncio.sleep(0.1)
 

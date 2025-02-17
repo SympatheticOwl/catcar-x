@@ -139,6 +139,7 @@ class AsyncObstacleAvoidance:
 
 
     async def emergency_stop(self):
+        print("emergency stop!")
         self.emergency_stop_flag = True
         # cancel any ongoing maneuver except backup
         if self.current_maneuver:
@@ -196,6 +197,7 @@ class AsyncObstacleAvoidance:
 
     async def evasive_maneuver(self):
         try:
+            print("begin evasive maneuver")
             self.is_moving = False
             self.px.forward(0)
             await asyncio.sleep(0.5)
