@@ -270,14 +270,13 @@ class AsyncObstacleAvoidance:
             await asyncio.sleep(0.1)
 
     async def navigate_to_target(self, target_x: float, target_y: float):
-        """Navigate to target coordinates while avoiding obstacles"""
+        """Navigate to target position while avoiding obstacles"""
         print(f"Starting navigation to target ({target_x}, {target_y})")
         self.navigation_target = (target_x, target_y)
         self.is_navigating = True
 
-        while self.is_navigating:
-            try:
-                # Get current position
+        try:
+            while self.is_navigating:
                 current_pos = self.px.get_position()
                 distance_to_target = math.sqrt(
                     (target_x - current_pos['x']) ** 2 +
@@ -285,105 +284,106 @@ class AsyncObstacleAvoidance:
                 )
 
                 # Check if we've reached the target
-                if distance_to_target < 10:  # 10cm threshold
-                    print("Reached target!")
-                    self.is_navigating = False
+                if distance_to_target < 5:  # 5cm threshold
+                    print("Reached target position!")
                     self.px.stop()
-                    break
+                    self.is_navigating = False
+                    return True
 
-                # If we don't have a current path or need to recalculate
-                if (not self.current_path or
-                        self.current_path_index >= len(self.current_path)):
+                # Find path to target
+                path = self.pathfinder.find_path(
+                    current_pos['x'],
+                    current_pos['y'],
+                    target_x,
+                    target_y
+                )
 
-                    # Scan environment if needed
-                    await self.scan_environment()
-                    self.world_map.add_padding()
+                if not path:
+                    print("No valid path found to target")
+                    self.is_navigating = False
+                    return False
 
-                    # Calculate new path
-                    print("Calculating new path...")
-                    self.current_path = self.pathfinder.find_path(
-                        current_pos['x'], current_pos['y'],
-                        target_x, target_y
-                    )
+                print(f"Following path with {len(path)} waypoints")
+                self.current_path = path
+                self.current_path_index = 0
 
-                    # Smooth the path
-                    self.current_path = self.pathfinder.smooth_path(self.current_path)
-                    self.current_path_index = 0
+                # Follow path
+                while self.current_path_index < len(self.current_path):
+                    if not self.is_navigating:
+                        return False
 
-                    if not self.current_path:
-                        print("No valid path found!")
-                        self.is_navigating = False
-                        self.px.stop()
-                        break
+                    waypoint_x, waypoint_y = self.current_path[self.current_path_index]
 
-                # Get next waypoint
-                next_waypoint = self.current_path[self.current_path_index]
-                print(f"Moving to waypoint: {next_waypoint}")
+                    # Navigate to waypoint while monitoring for obstacles
+                    while True:
+                        if not self.is_navigating:
+                            return False
 
-                # Navigate to waypoint
-                self.is_moving = True
-                while True:
-                    # Check if we need to stop due to obstacle
-                    if (self.current_distance < self.min_distance or
-                            self.emergency_stop_flag):
-                        print("Obstacle detected during navigation!")
-                        self.is_moving = False
-                        self.px.stop()
-
-                        # Only start evasive maneuver if we're not already backing up
-                        if not self.is_backing_up:
-                            self.current_maneuver = asyncio.create_task(
-                                self.evasive_maneuver()
-                            )
-                            await self.current_maneuver
-                        break
-
-                    # Calculate angle to waypoint
-                    dx = next_waypoint[0] - current_pos['x']
-                    dy = next_waypoint[1] - current_pos['y']
-                    target_heading = math.degrees(math.atan2(dy, dx))
-
-                    # Calculate angle difference
-                    angle_diff = target_heading - current_pos['heading']
-                    angle_diff = (angle_diff + 180) % 360 - 180
-
-                    # Set steering angle based on heading difference
-                    steering_angle = self.px.calculate_steering_angle(angle_diff)
-                    self.px.set_dir_servo_angle(steering_angle)
-
-                    # Move forward
-                    if not self.emergency_stop_flag:
-                        adjusted_speed = self.speed * (
-                                1 - abs(steering_angle) / (2 * self.px.MAX_STEERING_ANGLE)
+                        current_pos = self.px.get_position()
+                        distance_to_waypoint = math.sqrt(
+                            (waypoint_x - current_pos['x']) ** 2 +
+                            (waypoint_y - current_pos['y']) ** 2
                         )
-                        self.px.forward(adjusted_speed)
 
-                    # Check if we've reached the waypoint
-                    current_pos = self.px.get_position()
-                    dist_to_waypoint = math.sqrt(
-                        (next_waypoint[0] - current_pos['x']) ** 2 +
-                        (next_waypoint[1] - current_pos['y']) ** 2
-                    )
+                        # Check if we've reached the waypoint
+                        if distance_to_waypoint < 5:
+                            self.current_path_index += 1
+                            break
 
-                    if dist_to_waypoint < 10:  # 10cm threshold
-                        self.current_path_index += 1
+                        # Calculate heading to waypoint
+                        dx = waypoint_x - current_pos['x']
+                        dy = waypoint_y - current_pos['y']
+                        target_heading = math.degrees(math.atan2(dy, dx)) % 360
+
+                        # Calculate angle difference
+                        angle_diff = target_heading - current_pos['heading']
+                        angle_diff = (angle_diff + 180) % 360 - 180
+
+                        # Set steering angle
+                        steering_angle = self.px.calculate_steering_angle(angle_diff)
+                        self.px.set_dir_servo_angle(steering_angle)
+
+                        # Check for obstacles
+                        if (self.current_distance >= self.min_distance and
+                                not self.is_cliff and
+                                self.vision_clear):
+                            # Path is clear, move forward
+                            if not self.is_moving:
+                                print("Moving forward...")
+                                self.is_moving = True
+                                self.px.forward(self.speed)
+                        else:
+                            # Obstacle detected - stop and scan
+                            if self.is_moving:
+                                print("Obstacle detected, stopping to scan...")
+                                self.is_moving = False
+                                self.px.forward(0)
+
+                                # Scan environment and update map
+                                await self.scan_environment()
+
+                                # Break out of waypoint loop to recalculate path
+                                break
+
+                        await asyncio.sleep(0.1)
+
+                    # If we broke out of waypoint loop due to obstacle, break path loop too
+                    if (self.current_distance < self.min_distance or
+                            self.is_cliff or
+                            not self.vision_clear):
                         break
 
-                    await asyncio.sleep(0.1)
+                await asyncio.sleep(0.1)
 
-            except asyncio.CancelledError:
-                print("Navigation cancelled")
-                self.is_navigating = False
-                self.px.stop()
-                raise
-
-            except Exception as e:
-                print(f"Navigation error: {e}")
-                self.is_navigating = False
-                self.px.stop()
-                break
-
-            await asyncio.sleep(0.1)  # Main navigation loop delay
+        except asyncio.CancelledError:
+            print("Navigation cancelled")
+            self.is_navigating = False
+            raise
+        finally:
+            self.is_navigating = False
+            self.navigation_target = None
+            self.current_path = []
+            self.current_path_index = 0
 
     async def run(self):
         print("Starting enhanced obstacle avoidance program...")
