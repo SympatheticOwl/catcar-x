@@ -143,48 +143,122 @@ class AsyncObstacleAvoidance:
         self.emergency_stop_flag = False
         # self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
 
-    def find_best_direction(self):
-        """Analyze scan data to find the best direction to move"""
-        max_distance = 0
-        best_angle = 0
+    async def navigate_to_point(self, target_x, target_y, speed=30):
+        """Navigate to a target point using A* pathfinding"""
+        print(f"Starting navigation to ({target_x}, {target_y})")
 
-        # Convert current position to grid coordinates
-        curr_pos = self.px.get_position()
-        curr_grid_x, curr_grid_y = self.world_map.world_to_grid(curr_pos['x'], curr_pos['y'])
+        while True:
+            current_pos = self.px.get_position()
+            current_x, current_y = current_pos['x'], current_pos['y']
 
-        # Check angles in scan range
-        start_angle, end_angle = self.scan_range
-        for angle in range(start_angle, end_angle + 1, self.scan_step):
-            # Convert angle to radians
-            angle_rad = math.radians(angle)
+            # Check if we've reached the target
+            distance_to_target = math.sqrt(
+                (target_x - current_x) ** 2 +
+                (target_y - current_y) ** 2
+            )
+            if distance_to_target < 5:  # 5cm threshold
+                print("Reached target!")
+                self.px.stop()
+                return True
 
-            # Look ahead in this direction (check multiple distances)
-            max_check_distance = 100  # cm
-            check_step = 5  # cm
+            # Get current path or calculate new one
+            if not self.pathfinder.current_path:
+                print("Calculating initial path...")
+                path = await self.pathfinder.find_path(
+                    current_x, current_y,
+                    target_x, target_y
+                )
+                if not path:
+                    print("No valid path found!")
+                    self.px.stop()
+                    return False
 
-            # Find distance to first obstacle in this direction
-            distance_to_obstacle = max_check_distance
+            # Scan environment and update world map
+            if self.current_distance < self.min_distance or not self.vision_clear:
+                print("Obstacle detected! Stopping and scanning environment...")
+                self.px.stop()
 
-            for dist in range(check_step, max_check_distance, check_step):
-                # Calculate point to check in grid coordinates
-                check_x = curr_grid_x + int(dist * math.cos(angle_rad) / self.world_map.resolution)
-                check_y = curr_grid_y + int(dist * math.sin(angle_rad) / self.world_map.resolution)
+                # Perform a complete environment scan
+                scan_data = await self.scan_environment()
 
-                # Ensure within grid bounds
-                if (0 <= check_x < self.world_map.grid_size and
-                        0 <= check_y < self.world_map.grid_size):
+                # Find best direction to turn
+                print("Finding best direction to escape obstacle...")
+                best_angle, max_distance = self.find_best_direction(scan_data)
+                print(f"Best escape direction: {best_angle}° (clear path: {max_distance:.1f}cm)")
 
-                    # If we hit an obstacle, record distance and stop checking this direction
-                    if self.world_map.grid[check_y, check_x] != 0:
-                        distance_to_obstacle = dist
-                        break
+                # Update world map with scan data
+                for angle, distance in scan_data:
+                    self._update_ultrasonic_detection(distance)
+                self.world_map.add_padding()
 
-            # Update best direction if this is the clearest path
-            if distance_to_obstacle > max_distance:
-                max_distance = distance_to_obstacle
-                best_angle = angle
+                # Turn to the best direction
+                await self.px.turn_to_heading(self.px.heading + best_angle)
 
-        return best_angle, max_distance
+                # Update current position
+                current_pos = self.px.get_position()
+                current_x, current_y = current_pos['x'], current_pos['y']
+
+                # Recalculate path from new heading
+                print("Recalculating path from new heading...")
+                path = await self.pathfinder.update_path(
+                    current_x, current_y,
+                    target_x, target_y
+                )
+
+                if not path:
+                    print("No valid path found! Trying to find alternate route...")
+                    # Try to find a path to a point slightly offset from the target
+                    for offset in [(30, 0), (-30, 0), (0, 30), (0, -30)]:
+                        alt_target_x = target_x + offset[0]
+                        alt_target_y = target_y + offset[1]
+                        path = await self.pathfinder.update_path(
+                            current_x, current_y,
+                            alt_target_x, alt_target_y
+                        )
+                        if path:
+                            print("Found alternate route!")
+                            break
+
+                if not path:
+                    print("No valid path found after obstacle detection!")
+                    return False
+
+            # Get next waypoint
+            if len(self.pathfinder.current_path) > 1:
+                next_x, next_y = self.pathfinder.current_path[1]
+
+                # Calculate angle to next waypoint
+                dx = next_x - current_x
+                dy = next_y - current_y
+                target_angle = math.degrees(math.atan2(dy, dx))
+
+                # Calculate angle difference
+                angle_diff = target_angle - self.px.heading
+                # Normalize to -180 to 180
+                angle_diff = (angle_diff + 180) % 360 - 180
+
+                # Calculate steering angle
+                steering_angle = self.px.calculate_steering_angle(angle_diff)
+                self.px.set_dir_servo_angle(steering_angle)
+
+                # Adjust speed based on turn sharpness
+                adjusted_speed = speed * (1 - abs(steering_angle) / (2 * self.px.MAX_STEERING_ANGLE))
+
+                # Move forward if no obstacles detected
+                if self.current_distance >= self.min_distance and self.vision_clear:
+                    self.px.forward(adjusted_speed)
+                else:
+                    self.px.stop()
+
+                # Remove waypoint if we're close enough
+                waypoint_distance = math.sqrt(
+                    (next_x - current_x) ** 2 +
+                    (next_y - current_y) ** 2
+                )
+                if waypoint_distance < 10:  # 10cm threshold
+                    self.pathfinder.current_path.pop(0)
+
+            await asyncio.sleep(0.1)
 
     async def evasive_maneuver(self):
         try:
