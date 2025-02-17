@@ -293,9 +293,16 @@ class AsyncObstacleAvoidance:
                     return False
 
             # Scan environment and update world map
-            if self.emergency_stop_flag:
+            if self.current_distance < self.min_distance or not self.vision_clear:
                 print("Obstacle detected! Updating world map...")
-                self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
+                self.is_moving = False
+                self.px.forward(0)
+                await asyncio.sleep(0.5)
+                await self.scan_environment()
+
+                best_angle, max_distance = self.find_best_direction()
+                print(f"Turning to {best_angle}° (clearest path: {max_distance:.1f}cm)")
+                self.px.set_dir_servo_angle(best_angle)
                 print("current_maneuver done...")
                 # Recalculate path
                 print("Recalculating path...")
