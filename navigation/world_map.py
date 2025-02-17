@@ -1,209 +1,148 @@
-import heapq
-import math
+import time
 import numpy as np
-from typing import List, Tuple, Dict, Set
+from typing import Tuple, Dict
+from scipy import ndimage
 
+class WorldMap:
+    def __init__(self, map_size: int = 400, resolution: float = 20.0):
+        self.resolution = resolution
+        self.grid_size = int(map_size / resolution)
+        self.grid = np.zeros((self.grid_size, self.grid_size), dtype=np.uint8)
 
-class Pathfinder:
-    def __init__(self, world_map, picarx):
-        self.world_map = world_map
-        self.picarx = picarx
+        # Set origin to center of grid
+        self.origin = np.array([self.grid_size // 2, self.grid_size // 2])
 
-        # Movement costs
-        self.STRAIGHT_COST = 1.0
-        self.DIAGONAL_COST = 1.4  # sqrt(2)
+        # Obstacle tracking
+        self.obstacles = {}
+        self.obstacle_id_counter = 0
 
-        # Possible movement directions (8-directional movement)
-        self.DIRECTIONS = [
-            (-1, -1), (-1, 0), (-1, 1),  # Northwest, North, Northeast
-            (0, -1), (0, 1),  # West, East
-            (1, -1), (1, 0), (1, 1)  # Southwest, South, Southeast
-        ]
+        self.padding_size = 2
+        self.padding_structure = np.ones((2, 2))
 
-    def _heuristic(self, a: Tuple[int, int], b: Tuple[int, int]) -> float:
-        """Calculate heuristic (diagonal distance) between two points"""
-        dx = abs(a[0] - b[0])
-        dy = abs(a[1] - b[1])
-        return max(dx, dy) + (math.sqrt(2) - 1) * min(dx, dy)
+    def world_to_grid(self, x: float, y: float) -> Tuple[int, int]:
+        """Convert world coordinates (cm) to grid coordinates"""
+        grid_x = int(x / self.resolution) + self.origin[0]
+        grid_y = int(y / self.resolution) + self.origin[1]
 
-    def _get_neighbors(self, current: Tuple[int, int]) -> List[Tuple[int, int]]:
-        """Get valid neighboring grid cells"""
-        neighbors = []
+        # Ensure coordinates are within bounds
+        grid_x = max(0, min(grid_x, self.grid_size - 1))
+        grid_y = max(0, min(grid_y, self.grid_size - 1))
 
-        for dx, dy in self.DIRECTIONS:
-            new_x = current[0] + dx
-            new_y = current[1] + dy
+        print(f"Converting world ({x}, {y}) to grid ({grid_x}, {grid_y})")
+        return grid_x, grid_y
 
-            # Check bounds
-            if (0 <= new_x < self.world_map.grid_size and
-                    0 <= new_y < self.world_map.grid_size):
+    def grid_to_world(self, grid_x: int, grid_y: int) -> Tuple[float, float]:
+        """Convert grid coordinates to world coordinates (cm)"""
+        x = (grid_x - self.origin[0]) * self.resolution
+        y = (grid_y - self.origin[1]) * self.resolution
+        print(f"Converting grid ({grid_x}, {grid_y}) to world ({x}, {y})")
+        return x, y
 
-                # Check if cell is obstacle-free and print debugging info
-                if self.world_map.grid[new_y, new_x] == 0:
-                    neighbors.append((new_x, new_y))
-                else:
-                    print(f"Cell ({new_x}, {new_y}) blocked by obstacle")
-
-        if not neighbors:
-            print(f"Warning: No valid neighbors found for position {current}")
-
-        return neighbors
-
-    def _movement_cost(self, a: Tuple[int, int], b: Tuple[int, int]) -> float:
-        """Calculate cost of movement between adjacent cells"""
-        dx = abs(a[0] - b[0])
-        dy = abs(a[1] - b[1])
-
-        # Diagonal movement
-        if dx == 1 and dy == 1:
-            return self.DIAGONAL_COST
-        # Straight movement
-        return self.STRAIGHT_COST
-
-    def find_path(self, start_x: float, start_y: float,
-                  target_x: float, target_y: float) -> List[Tuple[float, float]]:
+    def add_obstacle(self, x: float, y: float, radius: float = 10.0, confidence: float = 1.0,
+                     label: str = "unknown") -> str:
         """
-        Find a path from start to target position using A* algorithm
+        Add an obstacle to the map
+
+        Args:
+            x, y: World coordinates of obstacle center (cm)
+            radius: Radius of obstacle (cm)
+            confidence: Detection confidence (0-1)
+            label: Object label from vision system
+
+        Returns:
+            obstacle_id: Unique ID for tracking this obstacle
         """
-        # Convert world coordinates to grid coordinates
-        start_grid = self.world_map.world_to_grid(start_x, start_y)
-        target_grid = self.world_map.world_to_grid(target_x, target_y)
+        obstacle_id = f"obs_{self.obstacle_id_counter}"
+        self.obstacle_id_counter += 1
 
-        print(f"\nPathfinding from {(start_x, start_y)} to {(target_x, target_y)}")
-        print(f"Grid coordinates: from {start_grid} to {target_grid}")
+        # Store obstacle metadata
+        self.obstacles[obstacle_id] = {
+            'x': x,
+            'y': y,
+            'radius': radius,
+            'confidence': confidence,
+            'label': label,
+            'last_seen': time.time()
+        }
 
-        # Print local grid area around start and target
-        print("\nGrid area around start position:")
-        self._print_local_grid(start_grid[0], start_grid[1])
-        print("\nGrid area around target position:")
-        self._print_local_grid(target_grid[0], target_grid[1])
+        # Update grid
+        self._update_grid_for_obstacle(x, y, radius)
 
-        # Check if target is reachable
-        if self.world_map.grid[target_grid[1], target_grid[0]] != 0:
-            print("Target position is blocked by obstacle")
-            return []
+        return obstacle_id
 
-        # Initialize data structures
-        frontier = []  # Priority queue of nodes to explore
-        heapq.heappush(frontier, (0, start_grid))
+    def _update_grid_for_obstacle(self, x: float, y: float, radius: float):
+        """Update grid cells for an obstacle"""
+        grid_x, grid_y = self.world_to_grid(x, y)
+        grid_radius = int(radius / self.resolution)
 
-        came_from = {start_grid: None}  # Path tracking
-        cost_so_far = {start_grid: 0}  # Cost to reach each node
+        # Calculate grid boundaries
+        x_min = max(0, grid_x - grid_radius)
+        x_max = min(self.grid_size, grid_x + grid_radius + 1)
+        y_min = max(0, grid_y - grid_radius)
+        y_max = min(self.grid_size, grid_y + grid_radius + 1)
 
-        explored_count = 0
-        max_iterations = self.world_map.grid_size * self.world_map.grid_size  # Prevent infinite loops
+        # Create a circle mask of the correct size
+        y_size = y_max - y_min
+        x_size = x_max - x_min
+        if y_size <= 0 or x_size <= 0:
+            return  # Skip if dimensions are invalid
 
-        # A* search
-        while frontier and explored_count < max_iterations:
-            current = heapq.heappop(frontier)[1]
-            explored_count += 1
+        y_indices, x_indices = np.ogrid[:y_size, :x_size]
 
-            # Path found
-            if current == target_grid:
-                print(f"Path found after exploring {explored_count} cells")
-                break
+        # Adjust indices to be centered on the obstacle
+        center_y = grid_y - y_min
+        center_x = grid_x - x_min
+        circle_mask = (x_indices - (x_size // 2)) ** 2 + (y_indices - (y_size // 2)) ** 2 <= grid_radius ** 2
 
-            # Explore neighbors
-            neighbors = self._get_neighbors(current)
-            for next_pos in neighbors:
-                new_cost = cost_so_far[current] + self._movement_cost(current, next_pos)
+        # Update grid using the correctly sized mask
+        self.grid[y_min:y_max, x_min:x_max] = np.logical_or(
+            self.grid[y_min:y_max, x_min:x_max],
+            circle_mask
+        ).astype(np.uint8)
 
-                if next_pos not in cost_so_far or new_cost < cost_so_far[next_pos]:
-                    cost_so_far[next_pos] = new_cost
-                    priority = new_cost + self._heuristic(next_pos, target_grid)
-                    heapq.heappush(frontier, (priority, next_pos))
-                    came_from[next_pos] = current
+    def update_obstacle_position(self, obstacle_id: str, new_x: float, new_y: float):
+        """Update position of a tracked obstacle"""
+        if obstacle_id in self.obstacles:
+            # Clear old position
+            old_x = self.obstacles[obstacle_id]['x']
+            old_y = self.obstacles[obstacle_id]['y']
+            radius = self.obstacles[obstacle_id]['radius']
+            self._clear_grid_area(old_x, old_y, radius)
 
-        # Check if path was found
-        if target_grid not in came_from:
-            print(f"No path found after exploring {explored_count} cells")
-            print(f"Frontier size: {len(frontier)}")
-            print(f"Final distance to target: {self._heuristic(current, target_grid)}")
-            return []
+            # Update position
+            self.obstacles[obstacle_id]['x'] = new_x
+            self.obstacles[obstacle_id]['y'] = new_y
+            self.obstacles[obstacle_id]['last_seen'] = time.time()
 
-        # Reconstruct path
-        path = []
-        current = target_grid
-        while current is not None:
-            path.append(current)
-            current = came_from[current]
-        path.reverse()
+            # Add to new position
+            self._update_grid_for_obstacle(new_x, new_y, radius)
 
-        # Convert back to world coordinates and add debug output
-        world_path = []
-        for x, y in path:
-            wx, wy = self.world_map.grid_to_world(x, y)
-            world_path.append((wx, wy))
-            print(f"Path point: grid({x}, {y}) -> world({wx:.1f}, {wy:.1f})")
+    def _clear_grid_area(self, x: float, y: float, radius: float):
+        """Clear grid cells in an area"""
+        grid_x, grid_y = self.world_to_grid(x, y)
+        grid_radius = int(radius / self.resolution)
 
-        return world_path
+        x_min = max(0, grid_x - grid_radius)
+        x_max = min(self.grid_size, grid_x + grid_radius + 1)
+        y_min = max(0, grid_y - grid_radius)
+        y_max = min(self.grid_size, grid_y + grid_radius + 1)
 
-    def _print_local_grid(self, x: int, y: int, radius: int = 3):
-        """Print a section of the grid around a point"""
-        x_min = max(0, x - radius)
-        x_max = min(self.world_map.grid_size, x + radius + 1)
-        y_min = max(0, y - radius)
-        y_max = min(self.world_map.grid_size, y + radius + 1)
+        if y_max > y_min and x_max > x_min:  # Ensure valid dimensions
+            self.grid[y_min:y_max, x_min:x_max] = 0
 
-        for j in range(y_min, y_max):
-            row = ""
-            for i in range(x_min, x_max):
-                if i == x and j == y:
-                    row += "X"  # Current position
-                else:
-                    row += "█" if self.world_map.grid[j, i] else "·"
-            print(row)
+    def add_padding(self):
+        """Add padding around obstacles"""
+        # Apply padding using binary dilation
+        self.grid = ndimage.binary_dilation(
+            self.grid,
+            structure=self.padding_structure,
+            iterations=self.padding_size
+        ).astype(np.uint8)
 
-    def smooth_path(self, path: List[Tuple[float, float]],
-                    smoothing_strength: float = 0.5) -> List[Tuple[float, float]]:
-        """Apply path smoothing to reduce sharp turns"""
-        if len(path) <= 2:
-            return path
+        print("\nCurrent Map (with padding):")
+        self.visualize_map()
 
-        smoothed = list(path)
-        change = True
-        iterations = 0
-        max_iterations = 10  # Limit smoothing iterations
-
-        while change and iterations < max_iterations:
-            change = False
-            iterations += 1
-
-            for i in range(1, len(smoothed) - 1):
-                old_x, old_y = smoothed[i]
-
-                # Calculate smoothed position
-                new_x = old_x + smoothing_strength * (smoothed[i - 1][0] + smoothed[i + 1][0] - 2 * old_x)
-                new_y = old_y + smoothing_strength * (smoothed[i - 1][1] + smoothed[i + 1][1] - 2 * old_y)
-
-                # Verify smoothed position is valid (not in obstacle)
-                grid_x, grid_y = self.world_map.world_to_grid(new_x, new_y)
-                if self.world_map.grid[grid_y, grid_x] == 0:
-                    smoothed[i] = (new_x, new_y)
-                    if abs(new_x - old_x) > 0.1 or abs(new_y - old_y) > 0.1:
-                        change = True
-
-        print(f"Path smoothing completed after {iterations} iterations")
-        return smoothed
-
-    def is_path_clear(self, path: List[Tuple[float, float]], clearance: float = 20.0) -> bool:
-        """Check if path is clear of obstacles"""
-        if not path:
-            return False
-
-        for i in range(len(path) - 1):
-            start = path[i]
-            end = path[i + 1]
-
-            # Check points along the line segment
-            steps = max(5, int(math.dist(start, end) / clearance))
-            for t in range(steps + 1):
-                x = start[0] + (end[0] - start[0]) * t / steps
-                y = start[1] + (end[1] - start[1]) * t / steps
-
-                grid_x, grid_y = self.world_map.world_to_grid(x, y)
-                if self.world_map.grid[grid_y, grid_x] != 0:
-                    print(f"Path blocked at world({x:.1f}, {y:.1f}) grid({grid_x}, {grid_y})")
-                    return False
-
-        return True
+    def visualize_map(self):
+        """Print ASCII visualization of the map"""
+        for row in self.grid:
+            print(''.join(['1' if cell else '0' for cell in row]))
