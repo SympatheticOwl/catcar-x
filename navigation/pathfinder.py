@@ -33,7 +33,7 @@ class Pathfinder:
 
         # Minimum turning radius considerations
         self.MIN_TURN_RADIUS = self.picar.get_min_turn_radius()
-        self.GRID_CELL_SIZE = self.world_map.grid_size
+        self.GRID_CELL_SIZE = self.world_map.resolution
         self.MIN_TURN_RADIUS_CELLS = int(self.MIN_TURN_RADIUS / self.GRID_CELL_SIZE)
 
     def heuristic(self, a: Tuple[int, int], b: Tuple[int, int]) -> float:
@@ -49,20 +49,24 @@ class Pathfinder:
         base_cost = self.DIAGONAL_COST if dx + dy == 2 else self.STRAIGHT_COST
 
         # Check if we need to consider turning radius
-        if current in came_from:
+        if current in came_from and came_from[current] is not None:
             prev = came_from[current]
             # Calculate angles
-            prev_angle = math.atan2(current[1] - prev[1], current[0] - prev[0])
-            next_angle = math.atan2(next_pos[1] - current[1], next_pos[0] - current[0])
-            angle_diff = abs(math.degrees(next_angle - prev_angle))
+            try:
+                prev_angle = math.atan2(current[1] - prev[1], current[0] - prev[0])
+                next_angle = math.atan2(next_pos[1] - current[1], next_pos[0] - current[0])
+                angle_diff = abs(math.degrees(next_angle - prev_angle))
 
-            # Add turning penalty if turn is too sharp
-            if angle_diff > 45:  # Sharp turn threshold
-                required_radius = self.MIN_TURN_RADIUS_CELLS
-                actual_radius = math.sqrt((next_pos[0] - current[0]) ** 2 +
-                                          (next_pos[1] - current[1]) ** 2)
-                if actual_radius < required_radius:
-                    base_cost *= 2.0  # Penalty for sharp turns
+                # Add turning penalty if turn is too sharp
+                if angle_diff > 45:  # Sharp turn threshold
+                    required_radius = self.MIN_TURN_RADIUS_CELLS
+                    actual_radius = math.sqrt((next_pos[0] - current[0]) ** 2 +
+                                              (next_pos[1] - current[1]) ** 2)
+                    if actual_radius < required_radius:
+                        base_cost *= 2.0  # Penalty for sharp turns
+            except (TypeError, ValueError):
+                # If there's any issue calculating angles, just return base cost
+                pass
 
         return base_cost
 
