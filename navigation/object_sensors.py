@@ -270,7 +270,7 @@ class AsyncObstacleAvoidance:
             await asyncio.sleep(0.1)
 
     async def navigate_to_target(self, target_x: float, target_y: float):
-        """Navigate to target coordinates while avoiding obstacles"""
+        """Navigate to target coordinates using 8-directional movement"""
         print(f"Starting navigation to target ({target_x}, {target_y})")
         self.is_navigating = True
 
@@ -293,9 +293,7 @@ class AsyncObstacleAvoidance:
                     self.is_navigating = False
                     return False
 
-                # Smooth the path
-                smoothed_path = self.pathfinder.smooth_path(path)
-                self.current_path = smoothed_path
+                self.current_path = path
                 self.current_path_index = 0
 
                 # Follow path
@@ -312,17 +310,51 @@ class AsyncObstacleAvoidance:
 
                     print(f"Navigating to waypoint: {next_world_point}")
 
-                    # Navigate to waypoint
-                    result = await self.px.navigate_to_point(
-                        next_world_point[0],
-                        next_world_point[1],
-                        speed=self.speed
+                    # Calculate required heading for 8-directional movement
+                    target_heading = self.pathfinder.get_direction_to_point(
+                        int(current_pos['x']), int(current_pos['y']),
+                        int(next_world_point[0]), int(next_world_point[1])
                     )
 
-                    if result:
+                    # Turn to target heading first
+                    if abs(target_heading - current_pos['heading']) > 5:
+                        print(f"Turning to heading {target_heading}")
+                        await self.px.turn_to_heading(target_heading)
+
+                    # Move forward until we reach the waypoint
+                    distance_to_waypoint = math.sqrt(
+                        (next_world_point[0] - current_pos['x']) ** 2 +
+                        (next_world_point[1] - current_pos['y']) ** 2
+                    )
+
+                    if distance_to_waypoint > self.grid_size * 0.5:  # Half grid cell threshold
+                        self.is_moving = True
+                        self.px.forward(self.speed)
+
+                        # Wait for arrival or interruption
+                        while (self.is_moving and
+                               not self.emergency_stop_flag and
+                               not self.current_maneuver):
+                            current_pos = self.px.get_position()
+                            distance_to_waypoint = math.sqrt(
+                                (next_world_point[0] - current_pos['x']) ** 2 +
+                                (next_world_point[1] - current_pos['y']) ** 2
+                            )
+
+                            if distance_to_waypoint <= self.world_map.grid_size * 0.5:
+                                break
+
+                            await asyncio.sleep(0.1)
+
+                    # Stop at waypoint
+                    self.is_moving = False
+                    self.px.forward(0)
+
+                    # Move to next waypoint if we weren't interrupted
+                    if not self.emergency_stop_flag and not self.current_maneuver:
                         self.current_path_index += 1
                     else:
-                        # If navigation failed, rescan environment and recalculate
+                        # Rescan environment and recalculate path
                         print("Navigation interrupted, rescanning environment...")
                         await self.scan_environment()
                         self.world_map.add_padding()
@@ -341,7 +373,7 @@ class AsyncObstacleAvoidance:
                 self.is_navigating = False
                 return False
 
-            await asyncio.sleep(0.1)  # Prevent tight loop
+            await asyncio.sleep(0.1)
 
         return False
 
