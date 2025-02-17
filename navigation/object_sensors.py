@@ -115,7 +115,7 @@ class AsyncObstacleAvoidance:
                 scan_data.append((angle, avg_dist))
 
         self.px.set_cam_pan_angle(0)
-        self.update_map(scan_data)
+        return scan_data
 
     def _polar_to_cartesian(self, angle_deg, distance):
         """Convert polar coordinates to cartesian"""
@@ -189,42 +189,6 @@ class AsyncObstacleAvoidance:
 
         return best_angle, max_distance
 
-    def update_map(self, scan_data):
-        # Create initial map from scan data
-        for i in range(len(scan_data) - 1):
-            angle1, dist1 = scan_data[i]
-            angle2, dist2 = scan_data[i + 1]
-
-            # Convert to cartesian coordinates
-            point1 = self._polar_to_cartesian(angle1, dist1)
-            point2 = self._polar_to_cartesian(angle2, dist2)
-
-            # Interpolate between points
-            num_points = max(
-                abs(int(point2[0] - point1[0])),
-                abs(int(point2[1] - point1[1]))
-            ) + 1
-
-            if num_points > 1:
-                x_points = np.linspace(point1[0], point2[0], num_points)
-                y_points = np.linspace(point1[1], point2[1], num_points)
-
-                # Mark interpolated points
-                for x, y in zip(x_points, y_points):
-                    map_x = int(x + self.map_size // 2)
-                    map_y = int(y + self.map_size // 2)
-
-                    if (0 <= map_x < self.map_size and
-                            0 <= map_y < self.map_size):
-                        self.map[map_y, map_x] = 1
-
-        print("\nCurrent Map (with padding):")
-        self.visualize_map()
-
-    def visualize_map(self):
-        for row in self.map:
-            print(''.join(['1' if cell else '0' for cell in row]))
-
     async def evasive_maneuver(self):
         try:
             print("begin evasive maneuver")
@@ -236,7 +200,7 @@ class AsyncObstacleAvoidance:
             # add padding once scanning is done
             # self.world_map.add_padding()
 
-            best_angle, max_distance = self.find_best_direction(self.map)
+            best_angle, max_distance = self.find_best_direction()
 
             # normal evasive maneuver
             print("Backing up...")
@@ -298,6 +262,8 @@ class AsyncObstacleAvoidance:
                         self.current_maneuver = asyncio.create_task(self.evasive_maneuver())
 
             await asyncio.sleep(0.1)
+
+
 
     async def navigate_to_point(self, target_x, target_y, speed=30):
         """Navigate to a target point using A* pathfinding"""
