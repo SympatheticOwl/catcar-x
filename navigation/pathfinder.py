@@ -158,7 +158,7 @@ class Pathfinder:
                 if i == x and j == y:
                     row += "X"  # Current position
                 else:
-                    row += "█" if self.world_map.grid[j, i] else "·"
+                    row += "1" if self.world_map.grid[j, i] else "0"
             print(row)
 
     def smooth_path(self, path: List[Tuple[float, float]],
