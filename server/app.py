@@ -1,6 +1,10 @@
+import string
 from flask import Flask
 from flask import render_template
 from flask import request, jsonify
+from commands import Commands
+
+commands = Commands()
 
 def greet(name):
     return "Hi " + name + " . Python server sends its regards."
@@ -22,5 +26,24 @@ def index():
     # return 'Iot is fun!'
     return jsonify(server_greet = greeting)
 
+@app.route('/commands/<command>', methods="GET")
+def command(command: string):
+    if command == 'forward':
+        commands.forward()
+        return "moving forward"
+    elif command == 'stop':
+        commands.cancel_movement()
+        return "cancel movement"
+    elif command == 'scan':
+        commands.scan_env()
+        return "scanning"
+    elif command == 'see':
+        commands.start_vision()
+        print("starting vision")
+        return "starting vision"
+    else:
+        print("Command not found")
+        return "unknown command"
+
 if __name__ == '__main__':
-    app.run( host='192.168.3.17', port = 5000, debug=True)
+    app.run( host='10.0.0.219', port = 5000, debug=True)
