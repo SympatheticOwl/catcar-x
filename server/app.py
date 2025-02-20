@@ -4,13 +4,17 @@ from flask import render_template
 from flask import request, jsonify
 from commands import Commands
 
-commands = Commands()
-
 def greet(name):
     return "Hi " + name + " . Python server sends its regards."
 
 app = Flask(__name__)
 greeting = " "
+commands = None
+
+@app.before_first_request
+def load_global_data():
+    global commands
+    commands = Commands()
 @app.route('/', methods=["GET", "POST"])
 def index():
 
@@ -26,7 +30,7 @@ def index():
     # return 'Iot is fun!'
     return jsonify(server_greet = greeting)
 
-@app.route('/commands/<command>', methods="GET")
+@app.route('/commands/<command>', methods=["GET"])
 def command(command: string):
     if command == 'forward':
         commands.forward()
