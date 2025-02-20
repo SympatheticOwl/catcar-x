@@ -5,9 +5,11 @@ import libcamera
 import asyncio
 import time
 from picamera2 import Picamera2
+from state_handler import State
+
 
 class VisionSystem:
-    def __init__(self, model_path='efficientdet_lite0.tflite', labels_path='coco_labels.txt'):
+    def __init__(self, state: State, model_path='efficientdet_lite0.tflite', labels_path='coco_labels.txt'):
         # Initialize camera
         self.camera = Picamera2()
         # Configure camera for video mode with higher framerate
