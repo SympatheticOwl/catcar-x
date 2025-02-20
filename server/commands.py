@@ -22,6 +22,11 @@ class Commands:
 
         # task states
         # always running for safety
+        self.state.ultrasonic_task = None
+        self.state.cliff_task = None
+        self.state.pos_track_task = None
+
+    def __post_init__(self):
         self.state.ultrasonic_task = asyncio.create_task(self.object_system.ultrasonic_monitoring())
         self.state.cliff_task = asyncio.create_task(self.object_system.cliff_monitoring())
         self.state.pos_track_task = asyncio.create_task(self.object_system.px.continuous_position_tracking())
@@ -84,6 +89,20 @@ class Commands:
             self.state.movement_task.cancel()
             self.state.movement_task = None
 
+    # def main():
+    #     try:
+    #         loop = asyncio.get_event_loop()
+    #         runner = loop.create_task(avoider.run())
+    #         loop.run_until_complete(runner)
+    #     except KeyboardInterrupt:
+    #         print("\nKeyboard interrupt received")
+    #         runner.cancel()
+    #         loop.run_until_complete(runner)
+    #     finally:
+    #         loop.close()
+    #
+    # if __name__ == "__main__":
+    #     main()
 
     # async def run(self):
     #     print("Starting enhanced obstacle avoidance program...")
