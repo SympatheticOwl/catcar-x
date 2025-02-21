@@ -17,7 +17,6 @@ def load_global_data():
     commands = Commands()
 @app.route('/', methods=["GET", "POST"])
 def index():
-
     global greeting
 
     # recieve message from electron app
@@ -32,6 +31,7 @@ def index():
 
 @app.route('/commands/<command>', methods=["GET"])
 def command(command: string):
+    global commands
     if command == 'forward':
         commands.forward()
         return "moving forward"
