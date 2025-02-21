@@ -21,7 +21,7 @@ class UltrasonicSystem:
             return
 
         # Calculate obstacle position in world coordinates
-        sensor_angle_rad = math.radians(self.px.heading)
+        sensor_angle_rad = math.radians(self.__state.heading)
         sensor_x = self.__state.x + self.__state.ULTRASONIC_OFFSET_X * math.cos(sensor_angle_rad)
         sensor_y = self.__state.y + self.__state.ULTRASONIC_OFFSET_X * math.sin(sensor_angle_rad)
 
