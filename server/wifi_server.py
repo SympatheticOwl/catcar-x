@@ -16,7 +16,7 @@ with (socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s):
                 client, clientInfo = s.accept()
                 print("server recv from: ", clientInfo)
                 data = client.recv(1024)      # receive 1024 Bytes of message in binary format
-                if decoded_data != b"":
+                if data != b"":
                     print(f"Received: {data}")
                     decoded_data = data.decode('utf-8').strip()
                     if decoded_data == 'forward':
