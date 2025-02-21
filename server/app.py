@@ -1,4 +1,5 @@
-from flask import Flask, jsonify
+import time
+from flask import Flask, jsonify, Response
 from typing import Dict, Optional
 import asyncio
 import threading
@@ -37,10 +38,37 @@ class AsyncCommandManager:
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
         return future.result()
 
+    pass
+
 
 # Create a single instance of the AsyncCommandManager
 manager = AsyncCommandManager()
 
+
+def generate_frames():
+    """Generator function for video streaming"""
+    while True:
+        if not manager.command_instance:
+            yield b''
+            continue
+
+        frame = manager.command_instance.vision.get_latest_frame_jpeg()
+        if frame is not None:
+            yield b'--frame\r\n'
+            yield b'Content-Type: image/jpeg\r\n\r\n'
+            yield frame
+            yield b'\r\n'
+
+        # Add a small delay to control frame rate
+        time.sleep(0.033)  # ~30 fps
+
+@app.route('/video_feed')
+def video_feed():
+    """Video streaming route"""
+    return Response(
+        generate_frames(),
+        mimetype='multipart/x-mixed-replace; boundary=frame'
+    )
 
 @app.route("/command/<cmd>", methods=['POST'])
 def execute_command(cmd: str) -> Dict:
@@ -100,8 +128,9 @@ def execute_command(cmd: str) -> Dict:
             objects = manager.command_instance.get_objects()
             return jsonify({
                 "status": "success",
-                "message": "Vision system started",
-                "objects": objects
+                "message": "Vision system started. Access video stream at /video_feed",
+                "stream_url": "/video_feed",
+                "objects": objects,
             })
 
         else:
@@ -147,7 +176,7 @@ def cleanup():
 def main():
     """Run the server"""
     try:
-        app.run(host="0.0.0.0", port=8000)
+        app.run(host="10.0.0.219", port=8000)
     except KeyboardInterrupt:
         print("\nShutting down server...")
     finally:

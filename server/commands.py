@@ -3,9 +3,8 @@ from typing import List, Dict, Tuple
 import numpy as np
 import asyncio
 import math
-
 from state_handler import State
-from vision_system import VisionSystem
+from streaming_vision_system import VisionSystem
 from picarx_wrapper import PicarXWrapper
 from ultrasonic_system import UltrasonicSystem
 

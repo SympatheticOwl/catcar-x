@@ -1,3 +1,5 @@
+import threading
+from typing import Optional
 import cv2
 import numpy as np
 import tflite_runtime.interpreter as tflite
@@ -47,6 +49,8 @@ class VisionSystem:
         # Initialize detection results
         self.detected_objects = []
         self.frame = None
+        self._frame_lock = threading.Lock()
+        self._latest_jpeg = None
 
     async def capture_and_detect(self):
         """Continuously capture frames and perform object detection"""
@@ -91,17 +95,19 @@ class VisionSystem:
                             'box': (xmin, ymin, xmax, ymax)
                         })
 
-                # Optional: Draw bounding boxes for debugging
-                self._draw_boxes()
+                # Draw boxes and update jpeg frame
+                debug_frame = self._draw_boxes()
+                self._update_jpeg_frame(debug_frame)
+
                 self.last_process_time = current_time
 
-            # Small sleep to prevent CPU overload while maintaining high capture rate
-            await asyncio.sleep(0.01)  # 10ms sleep
+            # Small sleep to prevent CPU overload
+            await asyncio.sleep(0.01)
 
     def _draw_boxes(self):
-        """Draw bounding boxes on the frame for visualization"""
+        """Draw bounding boxes on the frame and return the annotated frame"""
         if self.frame is None:
-            return
+            return None
 
         debug_frame = self.frame.copy()
         for obj in self.detected_objects:
@@ -112,9 +118,7 @@ class VisionSystem:
             cv2.putText(debug_frame, label, (xmin, ymin - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-        # Display the frame (optional, for debugging)
-        cv2.imshow('Object Detection', debug_frame)
-        cv2.waitKey(1)
+        return debug_frame
 
     def _preprocess_image(self, image):
         """Preprocess image for EfficientDet model which expects uint8 input"""
@@ -141,6 +145,22 @@ class VisionSystem:
                 center_objects.append(obj)
 
         return center_objects
+
+    def _update_jpeg_frame(self, frame: np.ndarray) -> None:
+        """Update the latest JPEG frame with thread safety"""
+        if frame is None:
+            return
+
+        # Encode frame to JPEG
+        ret, jpeg = cv2.imencode('.jpg', frame)
+        if ret:
+            with self._frame_lock:
+                self._latest_jpeg = jpeg.tobytes()
+
+    def get_latest_frame_jpeg(self) -> Optional[bytes]:
+        """Get the latest JPEG frame with thread safety"""
+        with self._frame_lock:
+            return self._latest_jpeg
 
     def cleanup(self):
         """Cleanup camera resources"""
