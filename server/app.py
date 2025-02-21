@@ -133,6 +133,14 @@ def execute_command(cmd: str) -> Dict:
                 "objects": objects,
             })
 
+        elif cmd == "blind":
+            # Create vision task in the event loop
+            manager.command_instance.stop_vision()
+            return jsonify({
+                "status": "success",
+                "message": "Vision system stopped"
+            })
+
         else:
             return jsonify({
                 "status": "error",
