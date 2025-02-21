@@ -23,6 +23,7 @@ class Commands:
         # task states
         # always running for safety
         self.state.ultrasonic_task = None
+        self.state.scan_task = None
         self.state.cliff_task = None
         self.state.pos_track_task = None
 
@@ -32,7 +33,7 @@ class Commands:
         self.state.pos_track_task = asyncio.create_task(self.object_system.px.continuous_position_tracking())
 
     def scan_env(self):
-        self.object_system.scan_environment()
+        self.state.scan_task = asyncio.create_task(self.object_system.scan_environment())
 
     def start_vision(self):
         self.state.vision_task = asyncio.create_task(self.vision.capture_and_detect())
