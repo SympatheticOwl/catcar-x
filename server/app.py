@@ -101,7 +101,7 @@ def execute_command(cmd: str) -> Dict:
             })
 
         elif cmd == "backward":
-            manager.command_instance.backward(-30)
+            manager.command_instance.backward(30)
             return jsonify({
                 "status": "success",
                 "message": "Moving backward"

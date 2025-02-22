@@ -59,7 +59,7 @@ class PicarXWrapper:
         self.__state.current_speed = self._speed_to_cm_per_sec(speed)
         self.__state.is_moving = speed != 0
 
-    def backward(self, speed = -30):
+    def backward(self, speed = 30):
         """Move backward with speed tracking"""
         self.px.backward(speed)
         self.__state.current_speed = -self._speed_to_cm_per_sec(speed)
