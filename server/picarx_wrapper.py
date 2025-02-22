@@ -53,13 +53,13 @@ class PicarXWrapper:
             self.__state.last_position_update = current_time
             await asyncio.sleep(0.05)  # Update at 20Hz
 
-    def forward(self, speed):
+    def forward(self, speed = 30):
         """Move forward with speed tracking"""
         self.px.forward(speed)
         self.__state.current_speed = self._speed_to_cm_per_sec(speed)
         self.__state.is_moving = speed != 0
 
-    def backward(self, speed):
+    def backward(self, speed = -30):
         """Move backward with speed tracking"""
         self.px.backward(speed)
         self.__state.current_speed = -self._speed_to_cm_per_sec(speed)
