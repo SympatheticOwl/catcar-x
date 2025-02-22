@@ -1,5 +1,5 @@
 import time
-from flask import Flask, jsonify, Response
+from flask import Flask, jsonify, Response, request
 from typing import Dict, Optional
 import asyncio
 import threading
@@ -95,6 +95,21 @@ def execute_command(cmd: str) -> Dict:
                 "message": "Moving forward"
             })
 
+        elif cmd == "backward":
+            manager.command_instance.backward()
+            return jsonify({
+                "status": "success",
+                "message": "Moving backwards"
+            })
+
+        elif cmd == "turn":
+            angle: int = request.args.get('angle')
+            manager.command_instance.turn(angle)
+            return jsonify({
+                "status": "success",
+                "message": "turning"
+            })
+
         elif cmd == "stop":
             manager.command_instance.cancel_movement()
             return jsonify({
@@ -185,6 +200,7 @@ def main():
     """Run the server"""
     try:
         app.run(host="10.0.0.219", port=8000)
+        # app.run(host="192.168.0.163", port=8000)
     except KeyboardInterrupt:
         print("\nShutting down server...")
     finally:
