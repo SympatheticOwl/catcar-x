@@ -7,6 +7,13 @@ from commands import Commands  # Assuming commands.py contains the Commands clas
 
 app = Flask(__name__)
 
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    return response
+
 
 class AsyncCommandManager:
     def __init__(self):
@@ -70,12 +77,10 @@ def video_feed():
         mimetype='multipart/x-mixed-replace; boundary=frame'
     )
 
+
 @app.route("/command/<cmd>", methods=['POST'])
 def execute_command(cmd: str) -> Dict:
-    """
-    Execute a command on the PicarX.
-    Available commands: forward, stop, scan, see
-    """
+    """Execute a command on the PicarX"""
     try:
         if not manager.command_instance:
             return jsonify({
@@ -96,18 +101,25 @@ def execute_command(cmd: str) -> Dict:
             })
 
         elif cmd == "backward":
-            manager.command_instance.backward()
+            # Get direction (-1 for backward)
+            manager.command_instance.backward(-1)
             return jsonify({
                 "status": "success",
-                "message": "Moving backwards"
+                "message": "Moving backward"
             })
 
-        elif cmd == "turn":
-            angle: int = request.args.get('angle')
-            manager.command_instance.turn(angle)
+        elif cmd in ["left", "right"]:
+            # Get angle from query params, default to ±30
+            angle = int(request.args.get('angle', 30 if cmd == "right" else -30))
+            success = manager.command_instance.turn(1 if cmd == "right" else -1)
+            if not success:
+                return jsonify({
+                    "status": "error",
+                    "message": "Cannot turn due to hazard"
+                }), 400
             return jsonify({
                 "status": "success",
-                "message": "turning"
+                "message": f"Turning {cmd} with angle {angle}"
             })
 
         elif cmd == "stop":
