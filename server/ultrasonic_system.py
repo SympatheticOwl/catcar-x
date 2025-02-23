@@ -50,23 +50,27 @@ class UltrasonicSystem:
             await asyncio.sleep(0.01)
         return distances
 
-    async def scan_environment(self):
+    async def __sensor_func(self, angle):
+        self.px.set_cam_pan_angle(angle)
+        await asyncio.sleep(self.__state.scan_frequency)
+        return await self.scan_avg()
+
+
+    def scan_environment(self):
         self.world_map.scan_surroundings(
-            sensor_func=self.scan_avg(),
+            sensor_func=self.__sensor_func,
             angle_range=self.__state.scan_range,
             angle_step=self.__state.scan_step,
         )
-        # scan_data = []
         # start_angle, end_angle = self.__state.scan_range
         #
         # for angle in range(start_angle, end_angle + 1, self.__state.scan_step):
         #     self.px.set_cam_pan_angle(angle)
-        #     await asyncio.sleep(0.05)
+        #     await asyncio.sleep(self.__state.scan_frequency)
         #     distance = await self.scan_avg()
         #     print(f'Environment Scan Distance: {distance}')
-        #
-        # self.px.set_cam_pan_angle(0)
-        # return scan_data
+        # #
+        self.px.set_cam_pan_angle(0)
 
     def __polar_to_cartesian(self, angle_deg, distance):
         """Convert polar coordinates to cartesian"""
