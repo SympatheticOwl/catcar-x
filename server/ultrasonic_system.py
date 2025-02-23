@@ -56,8 +56,8 @@ class UltrasonicSystem:
         return await self.scan_avg()
 
 
-    def scan_environment(self):
-        self.world_map.scan_surroundings(
+    async def scan_environment(self):
+        await self.world_map.scan_surroundings(
             sensor_func=self.__sensor_func,
             angle_range=self.__state.scan_range,
             angle_step=self.__state.scan_step,

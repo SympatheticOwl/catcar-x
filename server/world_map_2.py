@@ -153,7 +153,7 @@ class WorldMap2:
             self.grid[y, x] = 0
             self.confidence_grid[y, x] *= 0.5
 
-    def scan_surroundings(self, sensor_func, angle_range: Tuple[int, int] = (-60, 60),
+    async def scan_surroundings(self, sensor_func, angle_range: Tuple[int, int] = (-60, 60),
                           angle_step: int = 5):
         """
         Perform a full scan of surroundings
