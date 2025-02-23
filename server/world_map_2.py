@@ -164,6 +164,7 @@ class WorldMap2:
             angle_step: Degrees between readings
         """
         start_angle, end_angle = self.state.scan_range
+        print(start_angle, end_angle)
         for angle in range(start_angle, end_angle + 1, self.state.scan_step):
             distance = await sensor_func(angle)
             if distance is not None:

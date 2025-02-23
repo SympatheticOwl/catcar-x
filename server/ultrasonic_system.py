@@ -50,14 +50,13 @@ class UltrasonicSystem:
             await asyncio.sleep(0.01)
         return distances
 
-    async def __sensor_func(self, angle):
-        self.px.set_cam_pan_angle(angle)
-        await asyncio.sleep(self.__state.scan_frequency)
-        return await self.scan_avg()
-
-
     async def scan_environment(self):
-        await self.world_map.scan_surroundings(sensor_func=self.__sensor_func)
+        async def __sensor_func(self, angle):
+            self.px.set_cam_pan_angle(angle)
+            await asyncio.sleep(self.__state.scan_frequency)
+            return await self.scan_avg()
+
+        await self.world_map.scan_surroundings(sensor_func=__sensor_func)
         # start_angle, end_angle = self.__state.scan_range
         #
         # for angle in range(start_angle, end_angle + 1, self.__state.scan_step):
