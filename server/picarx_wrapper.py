@@ -58,6 +58,7 @@ class PicarXWrapper:
         self.px.forward(speed)
         self.__state.current_speed = self._speed_to_cm_per_sec(speed)
         self.__state.is_moving = speed != 0
+        self.__state.is_backing_up = False
 
     def backward(self, speed = 30):
         """Move backward with speed tracking"""
