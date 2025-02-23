@@ -199,9 +199,9 @@ class WorldMap2:
         map = []
         # Print grid with different markers
         for row in temp_grid:
-            map.append(''.join(['C' if cell == 2 else '#' if cell == 1 else '.' for cell in row]))
-
-        print(map)
+            row = ''.join(['C' if cell == 2 else '#' if cell == 1 else '.' for cell in row])
+            print(row)
+            map.append(row)
 
         return map
 
