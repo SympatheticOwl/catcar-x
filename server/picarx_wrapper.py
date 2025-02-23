@@ -74,7 +74,7 @@ class PicarXWrapper:
     def set_dir_servo_angle(self, angle):
         """Set steering angle"""
         # Clamp steering angle
-        if self.__state.current_steering_angle + angle <= 30 or self.__state.current_steering_angle + angle >= -30:
+        if self.__state.current_steering_angle + angle <= 30 and self.__state.current_steering_angle + angle >= -30:
             self.__state.current_steering_angle += angle
         self.px.set_dir_servo_angle(self.__state.current_steering_angle)
 
