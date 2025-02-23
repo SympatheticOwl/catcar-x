@@ -154,8 +154,7 @@ class WorldMap2:
             self.grid[y, x] = 0
             self.confidence_grid[y, x] *= 0.5
 
-    async def scan_surroundings(self, sensor_func, angle_range: Tuple[int, int] = (-60, 60),
-                          angle_step: int = 5):
+    async def scan_surroundings(self, sensor_func):
         """
         Perform a full scan of surroundings
 
@@ -164,8 +163,8 @@ class WorldMap2:
             angle_range: Tuple of (min_angle, max_angle)
             angle_step: Degrees between readings
         """
-        angles = range(angle_range[0], angle_range[1] + 1, angle_step)
-        for angle in angles:
+        start_angle, end_angle = self.state.scan_range
+        for angle in range(start_angle, end_angle + 1, self.state.scan_step):
             distance = await sensor_func(angle)
             if distance is not None:
                 self.update_from_sensor(distance, angle)
