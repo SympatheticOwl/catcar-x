@@ -57,11 +57,7 @@ class UltrasonicSystem:
 
 
     async def scan_environment(self):
-        await self.world_map.scan_surroundings(
-            sensor_func=self.__sensor_func,
-            angle_range=self.__state.scan_range,
-            angle_step=self.__state.scan_step
-        )
+        await self.world_map.scan_surroundings(sensor_func=self.__sensor_func)
         # start_angle, end_angle = self.__state.scan_range
         #
         # for angle in range(start_angle, end_angle + 1, self.__state.scan_step):
