@@ -6,6 +6,7 @@ class State:
     def __init__(self):
         self.current_distance = 300
         self.is_moving = False
+        self.is_backing_up = False
         self.is_cliff = False
         self.emergency_stop_flag = False
         self.vision_clear = True

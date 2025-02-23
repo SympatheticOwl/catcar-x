@@ -64,6 +64,7 @@ class PicarXWrapper:
         self.px.backward(speed)
         self.__state.current_speed = -self._speed_to_cm_per_sec(speed)
         self.__state.is_moving = speed != 0
+        self.__state.is_backing_up = True
 
     def stop(self):
         """Stop movement"""

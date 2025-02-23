@@ -90,6 +90,7 @@ class UltrasonicSystem:
 
             if (self.__state.is_cliff and
                     self.__state.is_moving and
+                    not self.__state.is_backing_up and
                     not self.__state.emergency_stop_flag):
                 print(f"Emergency stop, cliff detected!")
                 await self.emergency_stop()
