@@ -1,3 +1,4 @@
+import asyncio
 import math
 import time
 import numpy as np
@@ -165,7 +166,7 @@ class WorldMap2:
         """
         angles = range(angle_range[0], angle_range[1] + 1, angle_step)
         for angle in angles:
-            distance = sensor_func(angle)
+            distance = await sensor_func(angle)
             if distance is not None:
                 self.update_from_sensor(distance, angle)
 
