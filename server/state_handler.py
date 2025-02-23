@@ -31,7 +31,7 @@ class State:
         self.sensor_read_freq: Final[float] = 0.05
         self.scan_range: Final[int, int] = (-60, 60)
         self.scan_step: Final[int] = 5
-        self.scan_frequency: Final[float] = 0.05
+        self.scan_frequency: Final[float] = 0.1
 
         # Sensor offsets from center
         self.ULTRASONIC_OFFSET_X: Final[float] = 5.0  # cm forward
