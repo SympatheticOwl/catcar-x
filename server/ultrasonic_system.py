@@ -3,7 +3,9 @@ import asyncio
 import math
 from state_handler import State
 from world_map import WorldMap
+from world_map_2 import WorldMap2
 from picarx_wrapper import PicarXWrapper
+
 
 # TODO:
 #  separate commands.py and object system
@@ -13,7 +15,8 @@ class UltrasonicSystem:
     def __init__(self, state: State, px: PicarXWrapper):
         self.px = px
         self.__state = state
-        self.world_map = WorldMap()
+        # self.world_map = WorldMap()
+        self.world_map = WorldMap2(self.__state)
 
     def __update_ultrasonic_detection(self, distance: float):
         """Update map with obstacle detected by ultrasonic sensor"""
@@ -45,23 +48,25 @@ class UltrasonicSystem:
             if dist and 0 < dist < 300:  # Filter invalid readings
                 distances.append(dist)
             await asyncio.sleep(0.01)
-
-        if distances:
-            self.__update_ultrasonic_detection(sum(distances) / len(distances))
         return distances
 
     async def scan_environment(self):
-        scan_data = []
-        start_angle, end_angle = self.__state.scan_range
-
-        for angle in range(start_angle, end_angle + 1, self.__state.scan_step):
-            self.px.set_cam_pan_angle(angle)
-            await asyncio.sleep(0.05)
-            distance = await self.scan_avg()
-            print(f'Environment Scan Distance: {distance}')
-
-        self.px.set_cam_pan_angle(0)
-        return scan_data
+        self.world_map.scan_surroundings(
+            sensor_func=self.scan_avg(),
+            angle_range=self.__state.scan_range,
+            angle_step=self.__state.scan_step,
+        )
+        # scan_data = []
+        # start_angle, end_angle = self.__state.scan_range
+        #
+        # for angle in range(start_angle, end_angle + 1, self.__state.scan_step):
+        #     self.px.set_cam_pan_angle(angle)
+        #     await asyncio.sleep(0.05)
+        #     distance = await self.scan_avg()
+        #     print(f'Environment Scan Distance: {distance}')
+        #
+        # self.px.set_cam_pan_angle(0)
+        # return scan_data
 
     def __polar_to_cartesian(self, angle_deg, distance):
         """Convert polar coordinates to cartesian"""
@@ -97,7 +102,6 @@ class UltrasonicSystem:
 
             await asyncio.sleep(self.__state.sensor_read_freq)
 
-
     # cancel movement and set emergency stop
     async def emergency_stop(self):
         print("emergency stop, hazard detected!")
@@ -108,7 +112,6 @@ class UltrasonicSystem:
         if self.__state.movement_task:
             self.__state.movement_task.cancel()
             self.__state.movement_task = None
-
 
     # async def run(self):
     #     print("Starting enhanced obstacle avoidance program...")
