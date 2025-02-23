@@ -67,9 +67,9 @@ class Commands:
         self.state.movement_task = asyncio.create_task(self.px.forward(self.state.speed))
         return True
 
-    def backward(self, direction: int):
+    def backward(self):
         self.state.emergency_stop_flag = False
-        self.state.movement_task = asyncio.create_task(self.px.backward(direction * self.state.speed))
+        self.state.movement_task = asyncio.create_task(self.px.backward(self.state.speed))
 
     # TODO: adjust angle state
     # TODO: turn + forward? or turn left -> -=30, right -> +=30
