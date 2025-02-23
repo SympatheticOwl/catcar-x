@@ -79,7 +79,7 @@ def video_feed():
 
 
 @app.route("/command/<cmd>", methods=['POST'])
-def execute_command(cmd: str) -> Dict:
+async def execute_command(cmd: str) -> Dict:
     """Execute a command on the PicarX"""
     try:
         if not manager.commands:
@@ -129,7 +129,7 @@ def execute_command(cmd: str) -> Dict:
             })
 
         elif cmd == "scan":
-            map = manager.commands.scan_env()
+            map = await manager.commands.scan_env()
             print(f'map\n {map}')
             return jsonify({
                 "state": map
