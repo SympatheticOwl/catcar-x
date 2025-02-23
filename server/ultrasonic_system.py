@@ -18,7 +18,7 @@ class UltrasonicSystem:
         self.px = px
         self.__state = state
         # self.world_map = WorldMap()
-        self.world_map = WorldMap2(self.__state)
+        self.world_map = WorldMap2(self.__state, 100)
 
     # def __update_ultrasonic_detection(self, distance: float):
     #     """Update map with obstacle detected by ultrasonic sensor"""

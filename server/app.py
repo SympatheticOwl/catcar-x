@@ -130,7 +130,6 @@ async def execute_command(cmd: str) -> Dict:
 
         elif cmd == "scan":
             map = await manager.commands.scan_env()
-            print(f'map\n {map}')
             return jsonify({
                 "state": map
             })
