@@ -142,9 +142,12 @@ class WorldMap:
         self.visualize_map()
 
     def world_map(self):
-        to_list = self.grid.toList()
-        print(to_list)
-        return to_list
+        map = []
+        for row in self.grid:
+            map.append(''.join(['1' if cell else '0' for cell in row]))
+
+        print('\n'.join(map))
+        return map
 
     def visualize_map(self):
         """Print ASCII visualization of the map"""
