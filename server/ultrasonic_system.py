@@ -60,7 +60,6 @@ class UltrasonicSystem:
 
     async def scan_environment(self):
         async def __sensor_func(angle):
-            print(f"sensor_func: {angle}")
             self.px.set_cam_pan_angle(angle)
             await asyncio.sleep(self.__state.scan_frequency)
             return await self.scan_avg()
