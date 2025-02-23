@@ -18,14 +18,14 @@ def after_request(response):
 class AsyncCommandManager:
     def __init__(self):
         self.loop = asyncio.new_event_loop()
-        self.command_instance = None
+        self.commands = None
         self.thread = threading.Thread(target=self._run_event_loop, daemon=True)
         self.thread.start()
 
     def _run_event_loop(self):
         """Runs the event loop in a separate thread"""
         asyncio.set_event_loop(self.loop)
-        self.command_instance = Commands()
+        self.commands = Commands()
 
         # Initialize monitoring tasks in the event loop
         self.loop.run_until_complete(self._initialize_commands())
@@ -33,12 +33,12 @@ class AsyncCommandManager:
 
     async def _initialize_commands(self):
         """Initialize all monitoring tasks"""
-        self.command_instance.state.ultrasonic_task = self.loop.create_task(
-            self.command_instance.object_system.ultrasonic_monitoring())
-        self.command_instance.state.cliff_task = self.loop.create_task(
-            self.command_instance.object_system.cliff_monitoring())
-        self.command_instance.state.pos_track_task = self.loop.create_task(
-            self.command_instance.object_system.px.continuous_position_tracking())
+        self.commands.state.ultrasonic_task = self.loop.create_task(
+            self.commands.object_system.ultrasonic_monitoring())
+        self.commands.state.cliff_task = self.loop.create_task(
+            self.commands.object_system.cliff_monitoring())
+        self.commands.state.pos_track_task = self.loop.create_task(
+            self.commands.object_system.px.continuous_position_tracking())
 
     def run_coroutine(self, coro):
         """Run a coroutine in the event loop"""
@@ -55,11 +55,11 @@ manager = AsyncCommandManager()
 def generate_frames():
     """Generator function for video streaming"""
     while True:
-        if not manager.command_instance:
+        if not manager.commands:
             yield b''
             continue
 
-        frame = manager.command_instance.vision.get_latest_frame_jpeg()
+        frame = manager.commands.vision.get_latest_frame_jpeg()
         if frame is not None:
             yield b'--frame\r\n'
             yield b'Content-Type: image/jpeg\r\n\r\n'
@@ -82,14 +82,14 @@ def video_feed():
 def execute_command(cmd: str) -> Dict:
     """Execute a command on the PicarX"""
     try:
-        if not manager.command_instance:
+        if not manager.commands:
             return jsonify({
                 "status": "error",
                 "message": "Server still initializing"
             }), 503
 
         if cmd == "forward":
-            success = manager.command_instance.forward()
+            success = manager.commands.forward()
             if not success:
                 return jsonify({
                     "status": "error",
@@ -101,7 +101,7 @@ def execute_command(cmd: str) -> Dict:
             })
 
         elif cmd == "backward":
-            manager.command_instance.backward()
+            manager.commands.backward()
             return jsonify({
                 "status": "success",
                 "message": "Moving backward"
@@ -110,7 +110,7 @@ def execute_command(cmd: str) -> Dict:
         elif cmd in ["left", "right"]:
             # Get angle from query params, default to ±30
             angle = int(request.args.get('angle', 30 if cmd == "right" else -30))
-            success = manager.command_instance.turn(angle)
+            success = manager.commands.turn(angle)
             if not success:
                 return jsonify({
                     "status": "error",
@@ -122,36 +122,42 @@ def execute_command(cmd: str) -> Dict:
             })
 
         elif cmd == "stop":
-            manager.command_instance.cancel_movement()
+            manager.commands.cancel_movement()
             return jsonify({
                 "status": "success",
                 "message": "Stopped movement"
             })
 
         elif cmd == "scan":
-            # Create scan task in the event loop
-            manager.loop.call_soon_threadsafe(
-                lambda: setattr(
-                    manager.command_instance.state,
-                    'scan_task',
-                    manager.loop.create_task(manager.command_instance.object_system.scan_environment())
-                )
-            )
+            map = manager.commands.scan_env()
+            print(f'map\n {map}')
             return jsonify({
-                "status": "success",
-                "message": "Scanning environment"
+                "state": map
             })
+
+            # Create scan task in the event loop
+            # manager.loop.call_soon_threadsafe(
+            #     lambda: setattr(
+            #         manager.commands.state,
+            #         'scan_task',
+            #         manager.loop.create_task(manager.commands.object_system.scan_environment())
+            #     )
+            # )
+            # return jsonify({
+            #     "status": "success",
+            #     "message": "Scanning environment"
+            # })
 
         elif cmd == "see":
             # Create vision task in the event loop
             manager.loop.call_soon_threadsafe(
                 lambda: setattr(
-                    manager.command_instance.state,
+                    manager.commands.state,
                     'vision_task',
-                    manager.loop.create_task(manager.command_instance.vision.capture_and_detect())
+                    manager.loop.create_task(manager.commands.vision.capture_and_detect())
                 )
             )
-            objects = manager.command_instance.get_objects()
+            objects = manager.commands.get_objects()
             return jsonify({
                 "status": "success",
                 "message": "Vision system started. Access video stream at /video_feed",
@@ -161,7 +167,7 @@ def execute_command(cmd: str) -> Dict:
 
         elif cmd == "blind":
             # Create vision task in the event loop
-            manager.command_instance.stop_vision()
+            manager.commands.stop_vision()
             return jsonify({
                 "status": "success",
                 "message": "Vision system stopped"
@@ -183,24 +189,37 @@ def execute_command(cmd: str) -> Dict:
 @app.route("/status", methods=['GET'])
 def get_status() -> Dict:
     """Get the current status of the PicarX"""
-    if not manager.command_instance:
+    if not manager.commands:
         return jsonify({
             "status": "error",
             "message": "Server still initializing"
         }), 503
 
     return jsonify({
-        "object_distance": manager.command_instance.get_object_distance(),
-        "emergency_stop": manager.command_instance.state.emergency_stop_flag
+        "object_distance": manager.commands.get_object_distance(),
+        "emergency_stop": manager.commands.state.emergency_stop_flag
+    })
+
+@app.route("/world-state", methods=['GET'])
+def get_world_state() -> Dict:
+    """Get the current status of the PicarX"""
+    if not manager.commands:
+        return jsonify({
+            "status": "error",
+            "message": "Server still initializing"
+        }), 503
+
+    return jsonify({
+        "state": manager.commands.world_state()
     })
 
 
 def cleanup():
     """Cleanup function to stop all tasks and the event loop"""
-    if manager.command_instance:
-        if manager.command_instance.state.vision_task:
-            manager.command_instance.stop_vision()
-        manager.command_instance.cancel_movement()
+    if manager.commands:
+        if manager.commands.state.vision_task:
+            manager.commands.stop_vision()
+        manager.commands.cancel_movement()
 
     # Stop the event loop
     manager.loop.call_soon_threadsafe(manager.loop.stop)

@@ -31,8 +31,10 @@ class Commands:
         self.state.cliff_task = asyncio.create_task(self.object_system.cliff_monitoring())
         self.state.pos_track_task = asyncio.create_task(self.object_system.px.continuous_position_tracking())
 
-    def scan_env(self):
+    async def scan_env(self):
         self.state.scan_task = asyncio.create_task(self.object_system.scan_environment())
+        await self.state.scan_task
+        return self.world_state()
 
     def start_vision(self):
         self.state.vision_task = asyncio.create_task(self.vision.capture_and_detect())
@@ -84,6 +86,9 @@ class Commands:
         if self.state.movement_task:
             self.state.movement_task.cancel()
             self.state.movement_task = None
+
+    def world_state(self):
+        return self.object_system.world_map.world_state()
 
     # def main():
     #     try:

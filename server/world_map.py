@@ -141,6 +141,9 @@ class WorldMap:
         print("\nCurrent Map (with padding):")
         self.visualize_map()
 
+    def world_map(self):
+        return self.grid
+
     def visualize_map(self):
         """Print ASCII visualization of the map"""
         for row in self.grid:
