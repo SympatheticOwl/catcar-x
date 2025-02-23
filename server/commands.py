@@ -72,14 +72,15 @@ class Commands:
         self.state.movement_task = asyncio.create_task(self.px.backward(direction * self.state.speed))
 
     # TODO: adjust angle state
-    def turn(self, direction: int = 30):
+    # TODO: turn + forward? or turn left -> -=30, right -> +=30
+    def turn(self, angle: int):
         if self.state.emergency_stop_flag:
             print('hazard detected ahead, unable to move')
             return False
 
-        self.object_system.px.set_dir_servo_angle(direction * 30)
+        self.object_system.px.set_dir_servo_angle(angle)
         time.sleep(0.1)
-        self.state.movement_task = asyncio.create_task(self.px.forward(self.state.speed))
+        # self.state.movement_task = asyncio.create_task(self.px.forward(self.state.speed))
         return True
 
     def cancel_movement(self):

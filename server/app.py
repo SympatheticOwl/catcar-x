@@ -110,7 +110,7 @@ def execute_command(cmd: str) -> Dict:
         elif cmd in ["left", "right"]:
             # Get angle from query params, default to ±30
             angle = int(request.args.get('angle', 30 if cmd == "right" else -30))
-            success = manager.command_instance.turn(1 if cmd == "right" else -1)
+            success = manager.command_instance.turn(angle)
             if not success:
                 return jsonify({
                     "status": "error",

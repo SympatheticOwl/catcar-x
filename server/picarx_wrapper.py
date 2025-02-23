@@ -74,10 +74,7 @@ class PicarXWrapper:
     def set_dir_servo_angle(self, angle):
         """Set steering angle"""
         # Clamp steering angle
-        self.__state.current_steering_angle = (
-            max(-self.__state.MAX_STEERING_ANGLE,
-                min(self.__state.MAX_STEERING_ANGLE, angle))
-        )
+        self.__state.current_steering_angle += angle
         self.px.set_dir_servo_angle(self.__state.current_steering_angle)
 
     async def turn_to_heading(self, target_heading, speed=30):
