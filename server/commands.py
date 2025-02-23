@@ -88,8 +88,7 @@ class Commands:
             self.state.movement_task = None
 
     def world_state(self):
-        map_as_list = self.object_system.world_map.world_map().tolist()
-        print(map_as_list)
+        map_as_list = self.object_system.world_map.world_map()
         return map_as_list
 
     # def main():
