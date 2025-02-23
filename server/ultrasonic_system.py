@@ -90,6 +90,8 @@ class UltrasonicSystem:
                         not self.__state.emergency_stop_flag):
                     print(f"Emergency stop! Object detected at {self.__state.current_distance:.1f}cm")
                     await self.emergency_stop()
+                elif not self.__state.is_moving:
+                    self.__state.emergency_stop_flag = False
 
             await asyncio.sleep(self.__state.sensor_read_freq)
 
