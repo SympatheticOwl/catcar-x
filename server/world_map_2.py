@@ -9,7 +9,7 @@ from state_handler import State
 
 
 class WorldMap2:
-    def __init__(self, state: State, map_size: int = 200, resolution: float = 1.0):
+    def __init__(self, state, map_size: int = 200, resolution: float = 1.0):
         """
         Initialize world map with improved sensor integration
 
@@ -29,7 +29,6 @@ class WorldMap2:
         # Sensor configuration
         self.max_sensor_range = 300  # Maximum reliable sensor range in cm
         self.min_sensor_range = 25  # Minimum reliable sensor range in cm
-        self.interpolation_step = 1  # cm between interpolated points
 
         # For confidence tracking
         self.confidence_grid = np.zeros((self.grid_size, self.grid_size), dtype=np.float32)
@@ -70,35 +69,77 @@ class WorldMap2:
         y = max(0, min(y, self.grid_size - 1))
         return x, y
 
-    def update_from_sensor(self, distance: float, angle: float, confidence: float = 1.0):
+    def _connect_points(self, x1: int, y1: int, x2: int, y2: int):
+        """Connect two points with a line of obstacles using Bresenham's algorithm"""
+        dx = abs(x2 - x1)
+        dy = abs(y2 - y1)
+        steep = dy > dx
+
+        if steep:
+            x1, y1 = y1, x1
+            x2, y2 = y2, x2
+
+        if x1 > x2:
+            x1, x2 = x2, x1
+            y1, y2 = y2, y1
+
+        dx = x2 - x1
+        dy = abs(y2 - y1)
+        error = dx // 2
+        y = y1
+        y_step = 1 if y1 < y2 else -1
+
+        for x in range(x1, x2 + 1):
+            if steep:
+                self._set_obstacle(y, x)
+            else:
+                self._set_obstacle(x, y)
+
+            error -= dy
+            if error < 0:
+                y += y_step
+                error += dx
+
+    def _set_obstacle(self, x: int, y: int, confidence: float = 1.0):
+        """Set a grid cell as containing an obstacle"""
+        x, y = self._clamp_coordinates(x, y)
+        self.confidence_grid[y, x] = confidence
+        self.grid[y, x] = 1
+
+    def update_from_sensor_reading(self, distance: float, angle: float):
         """
-        Update map based on ultrasonic sensor reading
+        Update map based on a single ultrasonic sensor reading
 
         Args:
             distance: Distance reading in cm
             angle: Sensor angle in degrees (0 is forward)
-            confidence: Confidence in reading (0-1)
         """
         if not self.min_sensor_range <= distance <= self.max_sensor_range:
             return
 
-        # Convert to radians
-        angle_rad = math.radians(angle)
-
-        # Calculate obstacle position in car's coordinate frame
-        obstacle_x = distance * math.cos(angle_rad)
-        obstacle_y = distance * math.sin(angle_rad)
-
-        # Adjust for sensor offset
-        obstacle_x += self.state.ULTRASONIC_OFFSET_X
-        obstacle_y += self.state.ULTRASONIC_OFFSET_Y
+        # Convert sensor reading to cartesian coordinates
+        x, y = self.polar_to_cartesian(distance, angle)
 
         # Convert to grid coordinates
-        grid_x, grid_y = self.world_to_grid(obstacle_x, obstacle_y)
+        grid_x, grid_y = self.world_to_grid(x, y)
+        center_x, center_y = self.origin
 
-        # Update confidence and grid
-        self._update_confidence(grid_x, grid_y, confidence)
-        self._interpolate_to_point(0, 0, grid_x, grid_y)
+        # Connect the detected obstacle point with neighboring points
+        # to represent continuous surfaces
+        if hasattr(self, 'last_grid_x') and hasattr(self, 'last_grid_y'):
+            # Only connect if points are reasonably close
+            point_distance = math.sqrt((grid_x - self.last_grid_x) ** 2 +
+                                       (grid_y - self.last_grid_y) ** 2)
+            if point_distance < 10:  # Adjust threshold as needed
+                self._connect_points(self.last_grid_x, self.last_grid_y,
+                                     grid_x, grid_y)
+
+        # Store current point for next reading
+        self.last_grid_x = grid_x
+        self.last_grid_y = grid_y
+
+        # Mark the obstacle
+        self._set_obstacle(grid_x, grid_y)
 
     def _update_confidence(self, grid_x: int, grid_y: int, confidence: float):
         """Update confidence value for a grid cell"""
@@ -154,7 +195,8 @@ class WorldMap2:
             self.grid[y, x] = 0
             self.confidence_grid[y, x] *= 0.5
 
-    async def scan_surroundings(self, sensor_func):
+    def scan_surroundings(self, sensor_func, angle_range: Tuple[int, int] = (-60, 60),
+                          angle_step: int = 5):
         """
         Perform a full scan of surroundings
 
@@ -163,11 +205,18 @@ class WorldMap2:
             angle_range: Tuple of (min_angle, max_angle)
             angle_step: Degrees between readings
         """
-        start_angle, end_angle = self.state.scan_range
-        for angle in range(start_angle, end_angle + 1, self.state.scan_step):
-            distance = await sensor_func(angle)
+        # Clear last point tracking at start of new scan
+        if hasattr(self, 'last_grid_x'):
+            delattr(self, 'last_grid_x')
+        if hasattr(self, 'last_grid_y'):
+            delattr(self, 'last_grid_y')
+
+        # Perform scan
+        angles = range(angle_range[0], angle_range[1] + 1, angle_step)
+        for angle in angles:
+            distance = sensor_func(angle)
             if distance is not None:
-                self.update_from_sensor(distance, angle)
+                self.update_from_sensor_reading(distance, angle)
 
     def get_local_obstacles(self, range_cm: float = 50.0) -> List[Tuple[float, float]]:
         """Get list of obstacle coordinates within range of car"""
