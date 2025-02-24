@@ -85,6 +85,7 @@ class Commands:
             self.state.movement_task = None
 
     def world_state(self):
+        self.object_system.world_map.visualize()
         """Return both ASCII and grid data representations"""
         return {
             'ascii_map': self.object_system.world_map.ascii_visualize(),
