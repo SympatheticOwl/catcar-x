@@ -1,3 +1,8 @@
+import os
+os.environ['QT_QPA_PLATFORM'] = 'offscreen'  # Tell Qt to not use GUI
+os.environ['OPENCV_VIDEOIO_PRIORITY_BACKEND'] = 'v4l2'  # Use V4L2 backend for OpenCV
+os.environ['MPLBACKEND'] = 'Agg'  # Force matplotlib to use Agg backend
+
 import time
 from flask import Flask, jsonify, Response, request
 from typing import Dict, Optional

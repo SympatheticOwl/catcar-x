@@ -1,13 +1,12 @@
-import asyncio
 import base64
 import io
 import math
 import time
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from typing import Tuple, Dict, List
-from scipy import ndimage
-from picarx_wrapper import PicarXWrapper
 from state_handler import State
 
 

@@ -1,6 +1,9 @@
+import cv2
+cv2.setNumThreads(1)  # Limit OpenCV threading
+if hasattr(cv2, 'startWindowThread'):
+    cv2.startWindowThread = lambda: None  # Disable window thread
 import threading
 from typing import Optional
-import cv2
 import numpy as np
 import tflite_runtime.interpreter as tflite
 import libcamera
