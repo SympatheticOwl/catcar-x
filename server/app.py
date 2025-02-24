@@ -12,6 +12,8 @@ def after_request(response):
     response.headers.add('Access-Control-Allow-Origin', '*')
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    response.headers.add('Access-Control-Allow-Credentials', 'true')
+    response.headers.add('Access-Control-Expose-Headers', 'Content-Type,Content-Length')
     return response
 
 
@@ -234,9 +236,13 @@ def get_grid_data() -> Dict:
         }), 500
 
 
-@app.route("/visualization", methods=['GET'])
+@app.route("/visualization", methods=['GET', 'OPTIONS'])
 def get_visualization() -> Dict:
     """Get the matplotlib visualization of the world map"""
+    """Get the matplotlib visualization of the world map"""
+    if request.method == 'OPTIONS':
+        return jsonify({'status': 'ok'})
+
     if not manager.commands:
         return jsonify({
             "status": "error",
