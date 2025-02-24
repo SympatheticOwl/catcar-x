@@ -237,8 +237,7 @@ def get_grid_data() -> Dict:
 
 
 @app.route("/visualization", methods=['GET', 'OPTIONS'])
-def get_visualization() -> Dict:
-    """Get the matplotlib visualization of the world map"""
+def get_visualization():
     """Get the matplotlib visualization of the world map"""
     if request.method == 'OPTIONS':
         return jsonify({'status': 'ok'})
@@ -250,8 +249,13 @@ def get_visualization() -> Dict:
         }), 503
 
     try:
-        # Get the visualization from the world map
         visualization_data = manager.commands.object_system.world_map.get_visualization_data()
+
+        if visualization_data['visualization'] is None:
+            return jsonify({
+                "status": "error",
+                "message": "Failed to generate visualization"
+            }), 500
 
         return jsonify({
             "status": "success",

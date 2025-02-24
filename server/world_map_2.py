@@ -14,13 +14,13 @@ from state_handler import State
 class WorldMap2:
     def __init__(self, state: State, map_size: int = 400, resolution: float = 5.0):
         """
-        Initialize the world map
+             Initialize the world map
 
-        Args:
-            state: State object containing car position and heading
-            map_size: Size of the map in cm
-            resolution: cm per grid cell
-        """
+             Args:
+                 state: State object containing car position and heading
+                 map_size: Size of the map in cm
+                 resolution: cm per grid cell
+             """
         self.state = state
         self.resolution = resolution
         self.grid_size = int(map_size / resolution)
@@ -204,41 +204,48 @@ class WorldMap2:
         self.scanned_areas[old_areas] = 0
         self.scan_times[old_areas] = 0
 
-    def visualize(self, return_image=False):
+    def visualize(self, return_image=True):
         """
         Visualize the map with matplotlib
 
         Args:
-            return_image: If True, returns the plot as a base64 string instead of displaying
+            return_image: If True, returns the plot as a base64 string
         """
-        plt.figure(figsize=(10, 10))
-        plt.imshow(self.grid, cmap='gray_r', origin='lower')
+        try:
+            # Create a new figure with a white background
+            fig = plt.figure(figsize=(10, 10), facecolor='white')
+            ax = fig.add_subplot(111)
 
-        # Highlight car position
-        car_pos = np.where(self.grid == self.car_marker)
-        if len(car_pos[0]) > 0:
-            plt.plot(car_pos[1], car_pos[0], 'ro', markersize=10, label='Car')
+            # Plot the grid
+            im = ax.imshow(self.grid, cmap='gray_r', origin='lower')
 
-        # Add heading indicator
-        heading_rad = math.radians(self.state.heading)
-        heading_length = 3
-        dx = heading_length * math.cos(heading_rad)
-        dy = heading_length * math.sin(heading_rad)
-        plt.arrow(car_pos[1][0], car_pos[0][0], dx, dy,
-                  head_width=1, head_length=1, fc='r', ec='r')
+            # Highlight car position
+            car_pos = np.where(self.grid == self.car_marker)
+            if len(car_pos[0]) > 0:
+                ax.plot(car_pos[1], car_pos[0], 'ro', markersize=10, label='Car')
 
-        plt.grid(True)
-        plt.colorbar(label='Obstacle (1) / Car (2)')
-        plt.title('World Map')
-        plt.xlabel('X Grid Position')
-        plt.ylabel('Y Grid Position')
-        plt.legend()
+            # Add heading indicator
+            if len(car_pos[0]) > 0:
+                heading_rad = math.radians(self.state.heading)
+                heading_length = 3
+                dx = heading_length * math.cos(heading_rad)
+                dy = heading_length * math.sin(heading_rad)
+                ax.arrow(car_pos[1][0], car_pos[0][0], dx, dy,
+                         head_width=1, head_length=1, fc='r', ec='r')
 
-        if return_image:
+            # Customize the plot
+            ax.grid(True)
+            plt.colorbar(im, ax=ax, label='Obstacle (1) / Car (2)')
+            ax.set_title('World Map')
+            ax.set_xlabel('X Grid Position')
+            ax.set_ylabel('Y Grid Position')
+            ax.legend()
+
             # Save plot to a bytes buffer
             buf = io.BytesIO()
-            plt.savefig(buf, format='png', bbox_inches='tight')
-            plt.close()  # Close the figure to free memory
+            fig.savefig(buf, format='png', bbox_inches='tight',
+                        facecolor=fig.get_facecolor(), edgecolor='none')
+            plt.close(fig)  # Close the figure to free memory
 
             # Encode the bytes as base64
             buf.seek(0)
@@ -246,15 +253,16 @@ class WorldMap2:
             buf.close()
 
             return image_base64
-        else:
-            plt.show()
-            plt.close()  # Close the figure to free memory
+
+        except Exception as e:
+            print(f"Error in visualization: {str(e)}")
+            return None
 
     def get_visualization_data(self):
         """Get both the grid data and visualization"""
         return {
             'grid_data': self.get_grid_data(),
-            'visualization': self.visualize(return_image=True)
+            'visualization': self.visualize()
         }
 
     def ascii_visualize(self):
