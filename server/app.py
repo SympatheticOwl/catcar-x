@@ -234,6 +234,32 @@ def get_grid_data() -> Dict:
         }), 500
 
 
+@app.route("/visualization", methods=['GET'])
+def get_visualization() -> Dict:
+    """Get the matplotlib visualization of the world map"""
+    if not manager.commands:
+        return jsonify({
+            "status": "error",
+            "message": "Server still initializing"
+        }), 503
+
+    try:
+        # Get the visualization from the world map
+        visualization_data = manager.commands.object_system.world_map.get_visualization_data()
+
+        return jsonify({
+            "status": "success",
+            "data": {
+                "grid_data": visualization_data['grid_data'],
+                "plot_image": visualization_data['visualization']
+            }
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
 def cleanup():
     """Cleanup function to stop all tasks and the event loop"""
     if manager.commands:

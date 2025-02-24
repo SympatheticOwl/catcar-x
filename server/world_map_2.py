@@ -1,4 +1,6 @@
 import asyncio
+import base64
+import io
 import math
 import time
 import numpy as np
@@ -202,8 +204,13 @@ class WorldMap2:
         self.scanned_areas[old_areas] = 0
         self.scan_times[old_areas] = 0
 
-    def visualize(self):
-        """Visualize the map with matplotlib"""
+    def visualize(self, return_image=False):
+        """
+        Visualize the map with matplotlib
+
+        Args:
+            return_image: If True, returns the plot as a base64 string instead of displaying
+        """
         plt.figure(figsize=(10, 10))
         plt.imshow(self.grid, cmap='gray_r', origin='lower')
 
@@ -226,14 +233,36 @@ class WorldMap2:
         plt.xlabel('X Grid Position')
         plt.ylabel('Y Grid Position')
         plt.legend()
-        plt.show()
+
+        if return_image:
+            # Save plot to a bytes buffer
+            buf = io.BytesIO()
+            plt.savefig(buf, format='png', bbox_inches='tight')
+            plt.close()  # Close the figure to free memory
+
+            # Encode the bytes as base64
+            buf.seek(0)
+            image_base64 = base64.b64encode(buf.getvalue()).decode('utf-8')
+            buf.close()
+
+            return image_base64
+        else:
+            plt.show()
+            plt.close()  # Close the figure to free memory
+
+    def get_visualization_data(self):
+        """Get both the grid data and visualization"""
+        return {
+            'grid_data': self.get_grid_data(),
+            'visualization': self.visualize(return_image=True)
+        }
 
     def ascii_visualize(self):
         """Print ASCII visualization of the map"""
         rows = []
         for row in self.grid:
             rows.append(''.join(['C' if cell == self.car_marker else
-                               '#' if cell == 1 else '.' for cell in row]))
+                                 '#' if cell == 1 else '.' for cell in row]))
         print('\n'.join(rows))
         return rows
 
