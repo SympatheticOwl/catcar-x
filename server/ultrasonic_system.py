@@ -102,6 +102,7 @@ class UltrasonicSystem:
 
             await asyncio.sleep(self.__state.sensor_read_freq)
 
+    # TODO: dont call every time an object is detected as close
     # cancel movement and set emergency stop
     async def emergency_stop(self):
         print("emergency stop, hazard detected!")
