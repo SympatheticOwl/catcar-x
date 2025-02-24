@@ -56,13 +56,15 @@ class UltrasonicSystem:
             average = sum(distances) / len(distances)
 
         self.__state.current_distance = average
-        return average
+        return distances
 
     async def scan_environment(self):
         async def __sensor_func(angle):
             self.px.set_cam_pan_angle(angle)
             await asyncio.sleep(self.__state.scan_frequency)
-            return await self.scan_avg()
+            distances = await self.scan_avg()
+            print(distances)
+            return self.__state.current_distance
 
         await self.world_map.scan_surroundings(sensor_func=__sensor_func)
         self.px.set_cam_pan_angle(0)
