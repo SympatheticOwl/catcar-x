@@ -230,9 +230,26 @@ class WorldMap2:
 
     def ascii_visualize(self):
         """Print ASCII visualization of the map"""
+        rows = []
         for row in self.grid:
-            print(''.join(['C' if cell == self.car_marker else
-                           '#' if cell == 1 else '.' for cell in row]))
+            rows.append(''.join(['C' if cell == self.car_marker else
+                               '#' if cell == 1 else '.' for cell in row]))
+        print('\n'.join(rows))
+        return rows
+
+    def get_grid_data(self):
+        """Return grid data in a format suitable for API response"""
+        return {
+            'grid': self.grid.tolist(),
+            'car_position': {
+                'x': self.state.x,
+                'y': self.state.y,
+                'heading': self.state.heading
+            },
+            'resolution': self.resolution,
+            'grid_size': self.grid_size,
+            'car_marker': self.car_marker
+        }
 
     # def __init__(self, state: State, map_size: int = 400, resolution: float = 5.0):
     #     """

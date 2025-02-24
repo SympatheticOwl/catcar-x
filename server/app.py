@@ -212,6 +212,27 @@ def get_world_state() -> Dict:
         "state": manager.commands.world_state()
     })
 
+@app.route("/grid-data", methods=['GET'])
+def get_grid_data() -> Dict:
+    """Get the visual grid data of the world map"""
+    if not manager.commands:
+        return jsonify({
+            "status": "error",
+            "message": "Server still initializing"
+        }), 503
+
+    try:
+        world_state = manager.commands.world_state()
+        return jsonify({
+            "status": "success",
+            "data": world_state['grid_data']
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
 
 def cleanup():
     """Cleanup function to stop all tasks and the event loop"""

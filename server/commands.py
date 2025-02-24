@@ -9,7 +9,6 @@ from picarx_wrapper import PicarXWrapper
 from ultrasonic_system import UltrasonicSystem
 
 # TODO:
-#  separate commands.py and object system
 #  attach detected labels to objects in world grid
 #  add label to center of printed world grid surrounding picar?
 class Commands:
@@ -73,8 +72,6 @@ class Commands:
         self.state.emergency_stop_flag = False
         self.state.movement_task = asyncio.create_task(self.px.backward(self.state.speed))
 
-    # TODO: adjust angle state
-    # TODO: turn + forward? or turn left -> -=30, right -> +=30
     def turn(self, angle: int):
         self.object_system.px.set_dir_servo_angle(angle)
         time.sleep(0.1)
@@ -88,52 +85,8 @@ class Commands:
             self.state.movement_task = None
 
     def world_state(self):
-        map_as_list = self.object_system.world_map.world_map()
-        return map_as_list
-
-    # def main():
-    #     try:
-    #         loop = asyncio.get_event_loop()
-    #         runner = loop.create_task(avoider.run())
-    #         loop.run_until_complete(runner)
-    #     except KeyboardInterrupt:
-    #         print("\nKeyboard interrupt received")
-    #         runner.cancel()
-    #         loop.run_until_complete(runner)
-    #     finally:
-    #         loop.close()
-    #
-    # if __name__ == "__main__":
-    #     main()
-
-    # async def run(self):
-    #     print("Starting enhanced obstacle avoidance program...")
-    #     tasks = []
-    #     try:
-    #         # Create all tasks
-    #
-    #         ultrasonic_task = asyncio.create_task(self.ultrasonic_monitoring())
-    #
-    #
-    #         tasks = [
-    #             pos_track_task,
-    #             ultrasonic_task,
-    #             cliff_task,
-    #         ]
-    #
-    #         await asyncio.gather(*tasks)
-    #
-    #     except asyncio.CancelledError:
-    #         print("\nShutting down gracefully...")
-    #     finally:
-    #         for task in tasks:
-    #             task.cancel()
-    #         try:
-    #             await asyncio.gather(*tasks, return_exceptions=True)
-    #         except asyncio.CancelledError:
-    #             pass
-    #
-    #         self.vision.cleanup()
-    #         self.px.stop()
-    #         self.px.set_dir_servo_angle(0)
-    #         print("Shutdown complete")
+        """Return both ASCII and grid data representations"""
+        return {
+            'ascii_map': self.object_system.world_map.ascii_visualize(),
+            'grid_data': self.object_system.world_map.get_grid_data()
+        }
