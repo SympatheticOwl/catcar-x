@@ -3,9 +3,11 @@ import time
 import numpy as np
 import asyncio
 import math
+
 from state_handler import State
 from world_map import WorldMap
 from world_map_2 import WorldMap2
+from world_map_3 import WorldMap3
 from picarx_wrapper import PicarXWrapper
 
 
@@ -18,7 +20,8 @@ class UltrasonicSystem:
         self.px = px
         self.__state = state
         # self.world_map = WorldMap()
-        self.world_map = WorldMap2(self.__state)
+        # self.world_map = WorldMap2(self.__state)
+        self.world_map = WorldMap3(self.__state)
 
     # def __update_ultrasonic_detection(self, distance: float):
     #     """Update map with obstacle detected by ultrasonic sensor"""
