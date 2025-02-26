@@ -29,7 +29,7 @@ class UltrasonicSystem:
         # Debug counter for scan cycles
         self.scan_count = 0
 
-    async def scan_avg(self, num_samples: int = 5) -> List[float]:
+    async def scan_avg(self, num_samples: int = 3) -> List[float]:
         """
         Take multiple distance readings and return the filtered average
 
@@ -99,7 +99,7 @@ class UltrasonicSystem:
             await asyncio.sleep(self.__state.scan_frequency)
 
             # Take multiple readings at this angle to improve reliability
-            distances = await self.scan_avg(num_samples=5)
+            distances = await self.scan_avg()
 
             # Log reading for debugging
             if distances:
