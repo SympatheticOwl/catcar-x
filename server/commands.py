@@ -87,7 +87,6 @@ class Commands:
     def world_state(self):
         """Return complete world state including visualization"""
         return {
-            'ascii_map': self.object_system.world_map.ascii_visualize(),
-            'grid_data': self.object_system.world_map.get_grid_data(),
+            'ascii_map': self.object_system.world_map.get_ascii_map(),
             'visualization': self.object_system.world_map.visualize(return_image=True)
         }
