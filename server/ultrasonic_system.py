@@ -1,4 +1,5 @@
 import time
+from typing import List, Optional
 
 import numpy as np
 import asyncio
@@ -19,69 +20,113 @@ class UltrasonicSystem:
     def __init__(self, state: State, px: PicarXWrapper):
         self.px = px
         self.__state = state
-        # self.world_map = WorldMap()
-        # self.world_map = WorldMap2(self.__state)
         self.world_map = WorldMap3(self.__state)
 
-    # def __update_ultrasonic_detection(self, distance: float):
-    #     """Update map with obstacle detected by ultrasonic sensor"""
-    #     if not (0 < distance < 300):  # Ignore invalid readings
-    #         return
-    #
-    #     # Calculate obstacle position in world coordinates
-    #     sensor_angle_rad = math.radians(self.__state.heading)
-    #     sensor_x = self.__state.x + self.__state.ULTRASONIC_OFFSET_X * math.cos(sensor_angle_rad)
-    #     sensor_y = self.__state.y + self.__state.ULTRASONIC_OFFSET_X * math.sin(sensor_angle_rad)
-    #
-    #     obstacle_x = sensor_x + distance * math.cos(sensor_angle_rad)
-    #     obstacle_y = sensor_y + distance * math.sin(sensor_angle_rad)
-    #
-    #     # TODO add padding before danger check but dont add to base map?
-    #     # Add to world map
-    #     self.world_map.add_obstacle(
-    #         x=obstacle_x,
-    #         y=obstacle_y,
-    #         radius=5.0,  # Assume 5cm radius for ultrasonic detections
-    #         confidence=0.8,
-    #         label="ultrasonic_detection"
-    #     )
+        # Buffer for recent readings to help with filtering
+        self.recent_readings = []
+        self.max_buffer_size = 5
 
-    async def scan_avg(self):
+        # Debug counter for scan cycles
+        self.scan_count = 0
+
+    async def scan_avg(self, num_samples: int = 5) -> List[float]:
+        """
+        Take multiple distance readings and return the filtered average
+
+        Args:
+            num_samples: Number of samples to take
+
+        Returns:
+            List of valid distance readings
+        """
         distances = []
-        for _ in range(3):
+        for _ in range(num_samples):
             dist = self.px.ultrasonic.read()
-            if dist and 0 < dist < 300:  # Filter invalid readings
+            # Only add valid readings (not too close, not too far)
+            if dist and 5 < dist < 300:
                 distances.append(dist)
             await asyncio.sleep(0.01)
 
-        average = 300
+        # Store readings in buffer for tracking over time
         if distances:
-            average = sum(distances) / len(distances)
+            median_dist = sorted(distances)[len(distances) // 2]
+            self.recent_readings.append(median_dist)
+            # Keep buffer at max size
+            if len(self.recent_readings) > self.max_buffer_size:
+                self.recent_readings.pop(0)
+
+        # Calculate average with noise rejection
+        average = self.calculate_filtered_distance(distances)
 
         self.__state.current_distance = average
         return distances
 
+    def calculate_filtered_distance(self, distances: List[float]) -> float:
+        """
+        Calculate filtered distance with outlier rejection
+
+        Args:
+            distances: List of distance readings
+
+        Returns:
+            Filtered distance value
+        """
+        if not distances:
+            return 300  # Default safe distance if no valid readings
+
+        # If we have enough readings, remove outliers
+        if len(distances) >= 3:
+            # Sort distances and remove highest and lowest
+            sorted_dist = sorted(distances)
+            filtered_dist = sorted_dist[1:-1]
+
+            # Return average of remaining values
+            return sum(filtered_dist) / len(filtered_dist)
+        else:
+            # Not enough readings to filter outliers
+            return sum(distances) / len(distances)
+
     async def scan_environment(self):
+        """
+        Scan surroundings using servo-mounted ultrasonic sensor
+        """
+        self.scan_count += 1
+        print(f"Starting scan cycle #{self.scan_count}")
+
         async def __sensor_func(angle):
+            # Set servo angle and wait for it to stabilize
             self.px.set_cam_pan_angle(angle)
             await asyncio.sleep(self.__state.scan_frequency)
-            distances = await self.scan_avg()
-            print(distances)
+
+            # Take multiple readings at this angle to improve reliability
+            distances = await self.scan_avg(num_samples=5)
+
+            # Log reading for debugging
+            if distances:
+                median = sorted(distances)[len(distances) // 2]
+                print(f"Angle: {angle:3d}°, Distance: {median:6.2f} cm, Readings: {len(distances)}")
+            else:
+                print(f"Angle: {angle:3d}°, No valid readings")
+
             return self.__state.current_distance
 
+        # Perform the scan and update the world map
         await self.world_map.scan_surroundings(sensor_func=__sensor_func)
+
+        # Return servo to center position
         self.px.set_cam_pan_angle(0)
 
-    def __polar_to_cartesian(self, angle_deg, distance):
-        """Convert polar coordinates to cartesian"""
-        angle_rad = math.radians(angle_deg)
-        x = distance * math.cos(angle_rad)
-        y = distance * math.sin(angle_rad)
-        return np.array([x, y])
+        print(f"Scan cycle #{self.scan_count} completed")
 
     async def ultrasonic_monitoring(self):
+        """
+        Continuously monitor distance readings for emergency stops
+        """
         while True:
+            # Get current distance reading
             await self.scan_avg()
+
+            # Check for emergency stop conditions
             if (self.__state.current_distance < self.__state.min_distance and
                     self.__state.is_moving and
                     not self.__state.emergency_stop_flag):
@@ -93,6 +138,9 @@ class UltrasonicSystem:
             await asyncio.sleep(self.__state.sensor_read_freq)
 
     async def cliff_monitoring(self):
+        """
+        Continuously monitor cliff sensors to detect edges/drops
+        """
         while True:
             self.__state.is_cliff = self.px.get_cliff_status(self.px.get_grayscale_data())
 
@@ -105,10 +153,11 @@ class UltrasonicSystem:
 
             await asyncio.sleep(self.__state.sensor_read_freq)
 
-    # TODO: dont call every time an object is detected as close
-    # cancel movement and set emergency stop
     async def emergency_stop(self):
-        print("emergency stop, hazard detected!")
+        """
+        Perform emergency stop and cancel current movement
+        """
+        print("Emergency stop, hazard detected!")
         self.__state.emergency_stop_flag = True
 
         self.px.stop()
@@ -117,34 +166,20 @@ class UltrasonicSystem:
             self.__state.movement_task.cancel()
             self.__state.movement_task = None
 
-    # async def run(self):
-    #     print("Starting enhanced obstacle avoidance program...")
-    #     tasks = []
-    #     try:
-    #         # Create all tasks
-    #
-    #         ultrasonic_task = asyncio.create_task(self.ultrasonic_monitoring())
-    #
-    #
-    #         tasks = [
-    #             pos_track_task,
-    #             ultrasonic_task,
-    #             cliff_task,
-    #         ]
-    #
-    #         await asyncio.gather(*tasks)
-    #
-    #     except asyncio.CancelledError:
-    #         print("\nShutting down gracefully...")
-    #     finally:
-    #         for task in tasks:
-    #             task.cancel()
-    #         try:
-    #             await asyncio.gather(*tasks, return_exceptions=True)
-    #         except asyncio.CancelledError:
-    #             pass
-    #
-    #         self.vision.cleanup()
-    #         self.px.stop()
-    #         self.px.set_dir_servo_angle(0)
-    #         print("Shutdown complete")
+    def get_world_map_visualization(self) -> Optional[str]:
+        """
+        Get base64-encoded visualization of the current world map
+
+        Returns:
+            Base64-encoded PNG image of the world map or None if visualization fails
+        """
+        return self.world_map.visualize(return_image=True)
+
+    def get_current_distance(self) -> float:
+        """
+        Get the current distance reading
+
+        Returns:
+            Current ultrasonic distance in cm
+        """
+        return self.__state.current_distance
