@@ -254,7 +254,7 @@ def get_visualization():
         }), 503
 
     try:
-        visualization_data = manager.commands.object_system.world_map.get_visualization_data()
+        visualization_data = manager.commands.object_system.world_map.visualize()
 
         if visualization_data['visualization'] is None:
             return jsonify({
