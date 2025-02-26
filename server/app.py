@@ -85,6 +85,38 @@ def video_feed():
     )
 
 
+@app.route("/command/scan", methods=['POST'])
+def scan_command():
+    """Start a scan and return results immediately"""
+    if not manager.commands:
+        return jsonify({
+            "status": "error",
+            "message": "Server still initializing"
+        }), 503
+
+    try:
+        # Create async task to perform scan
+        future = asyncio.run_coroutine_threadsafe(
+            manager.commands.scan_env(),
+            manager.loop
+        )
+
+        # Get the result with timeout
+        result = future.result(timeout=15)
+
+        # Return scan result which includes visualization data
+        return jsonify(result)
+    except asyncio.TimeoutError:
+        return jsonify({
+            "status": "error",
+            "message": "Scan operation timed out"
+        }), 504
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
 @app.route("/command/<cmd>", methods=['POST'])
 async def execute_command(cmd: str) -> Dict:
     """Execute a command on the PicarX"""
@@ -134,25 +166,6 @@ async def execute_command(cmd: str) -> Dict:
                 "status": "success",
                 "message": "Stopped movement"
             })
-
-        elif cmd == "scan":
-            map = await manager.commands.scan_env()
-            return jsonify({
-                "state": map
-            })
-
-            # Create scan task in the event loop
-            # manager.loop.call_soon_threadsafe(
-            #     lambda: setattr(
-            #         manager.commands.state,
-            #         'scan_task',
-            #         manager.loop.create_task(manager.commands.object_system.scan_environment())
-            #     )
-            # )
-            # return jsonify({
-            #     "status": "success",
-            #     "message": "Scanning environment"
-            # })
 
         elif cmd == "see":
             # Create vision task in the event loop
@@ -254,9 +267,10 @@ def get_visualization():
         }), 503
 
     try:
+        # Get visualization data directly from the world map
         visualization_data = manager.commands.object_system.world_map.visualize()
 
-        if visualization_data['visualization'] is None:
+        if visualization_data.get('visualization') is None:
             return jsonify({
                 "status": "error",
                 "message": "Failed to generate visualization"
@@ -270,6 +284,8 @@ def get_visualization():
             }
         })
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({
             "status": "error",
             "message": str(e)

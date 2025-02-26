@@ -31,8 +31,32 @@ class Commands:
         self.state.pos_track_task = asyncio.create_task(self.object_system.px.continuous_position_tracking())
 
     async def scan_env(self):
+        """
+        Scan the environment and return the world state
+
+        Returns:
+            Dictionary with scan results and visualization data
+        """
+        # Perform a scan
+        print("Starting environment scan...")
         await self.object_system.scan_environment()
-        return self.world_state()
+        print("Environment scan completed")
+
+        # Generate visualization right after scan completes
+        visualization_data = self.object_system.world_map.visualize()
+
+        # Get the world state
+        world_data = self.world_state()
+
+        # Include visualization data in response
+        return {
+            "status": "success",
+            "data": {
+                "grid_data": visualization_data['grid_data'],
+                "plot_image": visualization_data['visualization'],
+                "world_state": world_data
+            }
+        }
 
     def start_vision(self):
         self.state.vision_task = asyncio.create_task(self.vision.capture_and_detect())
@@ -84,8 +108,30 @@ class Commands:
             self.state.movement_task = None
 
     def world_state(self):
-        """Return complete world state including visualization"""
+        """
+        Get the current world state including robot position, heading, and detected objects
+
+        Returns:
+            Dictionary with world state data
+        """
+        # Get position data
+        position = self.object_system.px.get_position()
+
+        # Get ultrasonic data
+        distance = self.object_system.get_current_distance()
+
+        # Get detected objects if vision system is active
+        objects = []
+        if self.state.vision_task and not self.state.vision_task.done():
+            objects = self.vision.detected_objects
+
         return {
+            "position": position,
+            "distance": distance,
+            "objects": objects,
+            "emergency_stop": self.state.emergency_stop_flag,
+            "is_moving": self.state.is_moving,
+            "is_cliff": self.state.is_cliff,
             'ascii_map': self.object_system.world_map.get_ascii_map(),
             'visualization': self.object_system.world_map.visualize(return_image=True)
         }
