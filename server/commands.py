@@ -31,8 +31,7 @@ class Commands:
         self.state.pos_track_task = asyncio.create_task(self.object_system.px.continuous_position_tracking())
 
     async def scan_env(self):
-        self.state.scan_task = asyncio.create_task(self.object_system.scan_environment())
-        await self.state.scan_task
+        await self.object_system.scan_environment()
         return self.world_state()
 
     def start_vision(self):
