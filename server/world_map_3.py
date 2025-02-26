@@ -1,10 +1,13 @@
 import numpy as np
 import math
+import matplotlib
+# Force matplotlib to use non-interactive backend
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import io
 import base64
 from matplotlib.colors import LinearSegmentedColormap
-from typing import Callable, List, Tuple, Optional, Any
+from typing import Callable, List, Tuple, Optional, Any, Awaitable
 import asyncio
 
 from state_handler import State
@@ -168,7 +171,7 @@ class WorldMap3:
 
         return points
 
-    async def scan_surroundings(self, sensor_func: Callable[[float], float],
+    async def scan_surroundings(self, sensor_func: Callable[[float], Awaitable[float]],
                                 angle_range: Tuple[int, int] = None,
                                 angle_step: int = None) -> None:
         """
@@ -210,16 +213,19 @@ class WorldMap3:
                 # Update grid with ray from robot to maximum range
                 self.update_grid_with_ray(robot_x, robot_y, far_x, far_y)
 
-    def visualize(self, return_image: bool = False) -> Optional[str]:
+    def visualize(self, return_image: bool = True) -> Optional[str]:
         """
         Visualize the world map
 
         Args:
-            return_image: If True, return base64-encoded PNG image
+            return_image: If True, return base64-encoded PNG image (default: True)
 
         Returns:
             Base64-encoded PNG image if return_image is True, else None
         """
+        # Use non-interactive Agg backend to avoid plt.show() issues in headless environments
+        plt.switch_backend('Agg')
+
         fig, ax = plt.subplots(figsize=(8, 8))
 
         # Plot the grid
@@ -254,16 +260,18 @@ class WorldMap3:
         # Set axis equal and limits
         ax.set_aspect('equal')
 
+        # Always save to buffer
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', dpi=100)
+        buf.seek(0)
+
         if return_image:
-            # Save image to buffer and convert to base64
-            buf = io.BytesIO()
-            plt.savefig(buf, format='png', dpi=100)
-            buf.seek(0)
+            # Convert to base64
             img_str = base64.b64encode(buf.read()).decode('utf-8')
             plt.close(fig)
             return img_str
         else:
-            plt.show()
+            # No need for plt.show(), just return None
             plt.close(fig)
             return None
 
