@@ -72,6 +72,10 @@ class WorldMap3:
             distance: Distance to obstacle in cm
             angle: Angle of sensor in degrees (relative to car's heading)
         """
+        # Always mark the path as scanned, even if no obstacle detected
+        self.mark_scanned_path(angle, distance)
+
+        # Only add obstacle point if distance is valid
         if distance >= self.state.min_distance:
             # Calculate absolute world coordinates of the obstacle
             # First, get the relative coordinates from car's perspective
@@ -86,19 +90,30 @@ class WorldMap3:
             # Convert to grid coordinates
             grid_x, grid_y = self.world_to_grid(abs_x, abs_y)
 
-            # Mark path as scanned
-            self.mark_scanned_path(angle, distance)
+            # Check bounds before setting
+            if 0 <= grid_x < self.grid_size and 0 <= grid_y < self.grid_size:
+                # Add obstacle to grid
+                self.grid[grid_y, grid_x] = 1
 
-            # Add obstacle to grid
-            self.grid[grid_y, grid_x] = 1
+                # Update scan times for this point
+                self.scan_times[grid_y, grid_x] = time.time()
 
-            # Update scan times for this point
-            self.scan_times[grid_y, grid_x] = time.time()
+                # Add additional points in a small radius around the detected point to make walls more visible
+                for dx in [-1, 0, 1]:
+                    for dy in [-1, 0, 1]:
+                        if dx == 0 and dy == 0:
+                            continue  # Skip the center point (already set)
+
+                        nx, ny = grid_x + dx, grid_y + dy
+                        if 0 <= nx < self.grid_size and 0 <= ny < self.grid_size:
+                            self.grid[ny, nx] = 1
+                            self.scan_times[ny, nx] = time.time()
 
             # If we have a previous scan, interpolate between them
             if self.last_scan is not None:
                 last_angle, last_distance = self.last_scan
-                if abs(last_angle - angle) <= self.state.scan_step:  # Only interpolate within scan step
+                angle_diff = abs(last_angle - angle)
+                if angle_diff <= 2 * self.state.scan_step:  # Only interpolate within reasonable angle
                     self.interpolate_obstacles(last_angle, last_distance, angle, distance)
 
             # Update last scan
@@ -131,6 +146,10 @@ class WorldMap3:
     def interpolate_obstacles(self, angle1: float, dist1: float,
                               angle2: float, dist2: float):
         """Interpolate obstacles between two readings in absolute coordinates"""
+        # Only interpolate if both distances are valid
+        if dist1 <= self.state.min_distance or dist2 <= self.state.min_distance:
+            return
+
         # Calculate absolute world coordinates of first reading
         rel_angle1_rad = math.radians(angle1 + self.state.heading)
         x1 = self.state.x + dist1 * math.cos(rel_angle1_rad)
@@ -141,9 +160,14 @@ class WorldMap3:
         x2 = self.state.x + dist2 * math.cos(rel_angle2_rad)
         y2 = self.state.y + dist2 * math.sin(rel_angle2_rad)
 
-        # Calculate number of interpolation points based on distance
+        # Calculate angle difference to check if we're seeing the same surface
+        angle_diff = abs(angle2 - angle1)
+        if angle_diff > 30:  # Don't interpolate across large angle changes
+            return
+
+        # Calculate number of interpolation points based on distance (use more points for higher precision)
         distance = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
-        num_points = int(distance / self.resolution)
+        num_points = max(3, int(distance / (self.resolution * 0.5)))  # Use at least 3 points
 
         if num_points > 1:  # Only interpolate if points are far enough apart
             # Interpolate points in world coordinates
@@ -154,8 +178,9 @@ class WorldMap3:
             current_time = time.time()
             for x, y in zip(x_points, y_points):
                 grid_x, grid_y = self.world_to_grid(x, y)
-                self.grid[grid_y, grid_x] = 1
-                self.scan_times[grid_y, grid_x] = current_time
+                if 0 <= grid_x < self.grid_size and 0 <= grid_y < self.grid_size:
+                    self.grid[grid_y, grid_x] = 1
+                    self.scan_times[grid_y, grid_x] = current_time
 
     async def scan_surroundings(self, sensor_func):
         """
@@ -207,29 +232,18 @@ class WorldMap3:
             world_y = np.linspace(world_min_y, world_max_y, self.grid_size)
             X, Y = np.meshgrid(world_x, world_y)
 
+            # Use a better color map for visualization
+            # White for empty space, black for obstacles, red for car
+            custom_cmap = matplotlib.colors.ListedColormap(['white', 'gray', 'red'])
+            bounds = [-0.5, 0.5, 1.5, 2.5]
+            norm = matplotlib.colors.BoundaryNorm(bounds, custom_cmap.N)
+
             # Plot grid cells with proper colors
-            cmap = plt.cm.get_cmap('gray_r', 3)  # 3 distinct colors for 0, 1, 2
-            im = ax.pcolormesh(X, Y, self.grid, cmap=cmap, shading='nearest')
+            im = ax.pcolormesh(X, Y, self.grid, cmap=custom_cmap, norm=norm, shading='auto')
 
-            # Add colorbar and make it discrete
-            cbar = plt.colorbar(im, ax=ax, ticks=[0.33, 1, 1.67])
-            cbar.ax.set_yticklabels(['Empty', 'Obstacle', 'Car'])
-
-            # Plot car position
-            car_grid_x, car_grid_y = self.world_to_grid(self.state.x, self.state.y)
-            car_x, car_y = self.grid_to_world(car_grid_x, car_grid_y)
-            ax.plot(car_x, car_y, 'ro', markersize=10, label=f'Car ({car_x:.1f}, {car_y:.1f})')
-
-            # Add car heading indicator
-            heading_rad = math.radians(self.state.heading)
-            heading_length = 20  # cm
-            dx = heading_length * math.cos(heading_rad)
-            dy = heading_length * math.sin(heading_rad)
-            ax.arrow(car_x, car_y, dx, dy, head_width=5, head_length=10, fc='r', ec='r')
-
-            # Add grid lines at regular intervals
-            grid_interval = 50  # cm
-            ax.grid(True, linestyle='--', alpha=0.5)
+            # Add grid lines at regular intervals (in cm)
+            grid_interval = 10  # cm (smaller grid for more detail)
+            ax.grid(True, linestyle='-', alpha=0.3)
             ax.set_xticks(np.arange(math.floor(world_min_x / grid_interval) * grid_interval,
                                     math.ceil(world_max_x / grid_interval) * grid_interval,
                                     grid_interval))
@@ -237,28 +251,44 @@ class WorldMap3:
                                     math.ceil(world_max_y / grid_interval) * grid_interval,
                                     grid_interval))
 
+            # Plot car position more precisely (actual coordinates, not grid-aligned)
+            ax.plot(self.state.x, self.state.y, 'ro', markersize=8, label='Car')
+
+            # Add car heading indicator
+            heading_rad = math.radians(self.state.heading)
+            heading_length = 15  # cm
+            dx = heading_length * math.cos(heading_rad)
+            dy = heading_length * math.sin(heading_rad)
+            ax.arrow(self.state.x, self.state.y, dx, dy,
+                     head_width=3, head_length=5, fc='r', ec='r')
+
             # Add axis labels and title
-            ax.set_title('World Map (Absolute Coordinates)')
-            ax.set_xlabel('X Position (cm)')
-            ax.set_ylabel('Y Position (cm)')
+            ax.set_title('World Map')
+            ax.set_xlabel('X Grid Position')
+            ax.set_ylabel('Y Grid Position')
 
             # Add origin indicators
-            ax.axhline(y=0, color='k', linestyle='--', alpha=0.3)
-            ax.axvline(x=0, color='k', linestyle='--', alpha=0.3)
+            ax.axhline(y=0, color='k', linestyle='--', alpha=0.5)
+            ax.axvline(x=0, color='k', linestyle='--', alpha=0.5)
 
-            # Set equal aspect ratio
+            # Set equal aspect ratio and limit view to reasonable area
             ax.set_aspect('equal')
+
+            # Focus the view on the area around the car (with some margin)
+            view_margin = 50  # cm
+            ax.set_xlim(self.state.x - view_margin, self.state.x + view_margin)
+            ax.set_ylim(self.state.y - view_margin, self.state.y + view_margin)
 
             # Add car position and heading info
             ax.text(0.02, 0.98,
-                    f'Car: ({car_x:.1f}, {car_y:.1f}) cm\n' +
+                    f'Car: ({self.state.x:.1f}, {self.state.y:.1f}) cm\n' +
                     f'Heading: {self.state.heading:.1f}°',
                     transform=ax.transAxes,
                     verticalalignment='top',
                     bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
 
             # Add legend
-            ax.legend(loc='lower right')
+            ax.legend(loc='upper right')
 
             if return_image:
                 # Save plot to a bytes buffer
