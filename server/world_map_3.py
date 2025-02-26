@@ -213,7 +213,7 @@ class WorldMap3:
                 # Update grid with ray from robot to maximum range
                 self.update_grid_with_ray(robot_x, robot_y, far_x, far_y)
 
-    def visualize(self, return_image: bool = True) -> Optional[str]:
+    def visualize(self, return_image: bool = True) -> dict:
         """
         Visualize the world map
 
@@ -221,7 +221,7 @@ class WorldMap3:
             return_image: If True, return base64-encoded PNG image (default: True)
 
         Returns:
-            Base64-encoded PNG image if return_image is True, else None
+            Dictionary with visualization data and grid data
         """
         # Use non-interactive Agg backend to avoid plt.show() issues in headless environments
         plt.switch_backend('Agg')
@@ -260,20 +260,40 @@ class WorldMap3:
         # Set axis equal and limits
         ax.set_aspect('equal')
 
+        # Prepare grid data for ASCII representation
+        grid_data = {
+            'grid': self.grid.tolist(),
+            'position': {
+                'x': float(self.state.x),
+                'y': float(self.state.y),
+                'heading': float(self.state.heading)
+            },
+            'dimensions': {
+                'width': self.grid_size,
+                'height': self.grid_size,
+                'cell_size': self.cell_size,
+                'origin': self.origin
+            }
+        }
+
         # Always save to buffer
         buf = io.BytesIO()
         plt.savefig(buf, format='png', dpi=100)
         buf.seek(0)
 
+        result = {'grid_data': grid_data}
+
         if return_image:
             # Convert to base64
             img_str = base64.b64encode(buf.read()).decode('utf-8')
             plt.close(fig)
-            return img_str
+            result['visualization'] = img_str
         else:
-            # No need for plt.show(), just return None
+            # No need for plt.show(), just return None for visualization
             plt.close(fig)
-            return None
+            result['visualization'] = None
+
+        return result
 
     def get_ascii_map(self, width: int = 40, height: int = 20) -> str:
         """
