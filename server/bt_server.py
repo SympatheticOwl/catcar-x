@@ -5,17 +5,15 @@ import threading
 import json
 import logging
 from typing import Dict, Optional
-
-# Bluetooth libraries
-import bluetooth
-from bluetooth.bluez import BluetoothSocket
-from bluetooth.bluez import advertise_service
-import uuid
+import base64
 
 # Set environment variables
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'  # Tell Qt to not use GUI
 os.environ['OPENCV_VIDEOIO_PRIORITY_BACKEND'] = 'v4l2'  # Use V4L2 backend for OpenCV
 os.environ['MPLBACKEND'] = 'Agg'  # Force matplotlib to use Agg backend
+
+# Bluedot library
+from bluedot.btcomm import BluetoothServer
 
 # Import your existing commands module
 from commands import Commands
@@ -23,11 +21,7 @@ from commands import Commands
 # Configure logging
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("PicarX_BT_Server")
-
-# Define Bluetooth service
-SERVICE_NAME = "PicarXBTServer"
-SERVICE_UUID = str(uuid.uuid4())
+logger = logging.getLogger("PicarX_Bluedot_Server")
 
 
 class AsyncCommandManager:
@@ -62,7 +56,7 @@ class AsyncCommandManager:
     def run_coroutine(self, coro):
         """Run a coroutine in the event loop and return its result"""
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
-        return future.result()
+        return future.result(10)  # Wait up to 10 seconds for result
 
     def get_cached_visualization(self):
         """Get the cached visualization data"""
@@ -75,59 +69,38 @@ class AsyncCommandManager:
             self._last_visualization = viz_data
 
 
-class BluetoothServer:
-    def __init__(self, port=1):
+class BluedotServer:
+    def __init__(self, device_name="PicarXServer"):
+        """Initialize the Bluedot server
+
+        Args:
+            device_name: Device name for Bluetooth advertisements
+        """
         self.manager = AsyncCommandManager()
-        self.port = port
-        self.server_sock = None
-        self.client_sock = None
-        self.client_info = None
+        self.device_name = device_name
+        self.server = None
         self.running = False
-        self.current_frame = None
-        self.frame_lock = threading.Lock()
 
-    def setup_server(self):
-        """Set up the Bluetooth server socket"""
-        try:
-            # Create a Bluetooth server socket
-            self.server_sock = BluetoothSocket(bluetooth.RFCOMM)
-            self.server_sock.bind(("", self.port))
-            self.server_sock.listen(1)  # Only allow 1 connection at a time
+        # Set up connection state
+        self.connected_clients = set()
 
-            # Advertise the service
-            advertise_service(
-                self.server_sock,
-                SERVICE_NAME,
-                service_id=SERVICE_UUID,
-                service_classes=[SERVICE_UUID, bluetooth.SERIAL_PORT_CLASS],
-                profiles=[bluetooth.SERIAL_PORT_PROFILE]
-            )
+    def handle_data(self, data, client_addr):
+        """Handle data received from a client
 
-            logger.info(f"Bluetooth server started on port {self.port}")
-            logger.info(f"Service Name: {SERVICE_NAME}")
-            logger.info(f"Service UUID: {SERVICE_UUID}")
+        Args:
+            data: The data received as string
+            client_addr: The client address tuple (address, port)
 
-            return True
-        except Exception as e:
-            logger.error(f"Error setting up Bluetooth server: {str(e)}")
-            return False
-
-    def wait_for_connection(self):
-        """Wait for a client to connect"""
-        logger.info("Waiting for Bluetooth connection...")
-        self.client_sock, self.client_info = self.server_sock.accept()
-        logger.info(f"Accepted connection from {self.client_info}")
-        return True
-
-    def handle_command(self, command_str):
-        """Handle a command received from the client"""
+        Returns:
+            Response string or None
+        """
         try:
             # Parse the command
-            command_data = json.loads(command_str)
+            command_data = json.loads(data)
             cmd = command_data.get('cmd')
             params = command_data.get('params', {})
 
-            logger.debug(f"Received command: {cmd}, params: {params}")
+            logger.debug(f"Received command: {cmd}, params: {params} from {client_addr}")
 
             if not self.manager.commands:
                 return json.dumps({
@@ -177,19 +150,25 @@ class BluetoothServer:
 
             elif cmd == "scan":
                 # Run the scan operation and get results
-                scan_result = self.manager.run_coroutine(self.manager.commands.scan_env())
+                try:
+                    scan_result = self.manager.run_coroutine(self.manager.commands.scan_env())
 
-                # Cache visualization for later requests
-                if scan_result.get('status') == 'success':
-                    self.manager.update_cached_visualization(scan_result.get('data', {}))
+                    # Cache visualization for later requests
+                    if scan_result.get('status') == 'success':
+                        self.manager.update_cached_visualization(scan_result.get('data', {}))
 
-                # Since Bluetooth has limited bandwidth, we'll just inform that scan is complete
-                # The client can request visualization separately if needed
-                return json.dumps({
-                    "status": "success",
-                    "message": "Scan complete",
-                    "world_state": scan_result.get('data', {}).get('world_state', {})
-                })
+                    # Since Bluetooth has limited bandwidth, we'll just inform that scan is complete
+                    # The client can request visualization separately if needed
+                    return json.dumps({
+                        "status": "success",
+                        "message": "Scan complete",
+                        "world_state": scan_result.get('data', {}).get('world_state', {})
+                    })
+                except asyncio.TimeoutError:
+                    return json.dumps({
+                        "status": "error",
+                        "message": "Scan operation timed out"
+                    })
 
             elif cmd == "get_visualization":
                 # Get the cached visualization
@@ -250,86 +229,83 @@ class BluetoothServer:
                 "message": f"Server error: {str(e)}"
             })
 
-    def run(self):
-        """Run the Bluetooth server"""
-        if not self.setup_server():
-            return
+    def client_connected(self, client_addr):
+        """Handle client connection"""
+        logger.info(f"Client connected: {client_addr}")
+        self.connected_clients.add(client_addr)
 
-        self.running = True
+    def client_disconnected(self, client_addr):
+        """Handle client disconnection"""
+        logger.info(f"Client disconnected: {client_addr}")
+        if client_addr in self.connected_clients:
+            self.connected_clients.remove(client_addr)
 
-        while self.running:
+    def start(self):
+        """Start the Bluetooth server"""
+        try:
+            logger.info(f"Starting Bluetooth server with device name: {self.device_name}")
+
+            # Create the Bluetooth server
+            self.server = BluetoothServer(
+                self.handle_data,
+                when_client_connects=self.client_connected,
+                when_client_disconnects=self.client_disconnected,
+                device=self.device_name,
+                auto_start=False
+            )
+
+            # Start the server
+            self.server.start()
+            self.running = True
+
+            logger.info("Bluetooth server started. Waiting for connections...")
+
+            # Keep the main thread alive
             try:
-                # Wait for a connection
-                self.wait_for_connection()
-
-                # Handle client communication
-                while True:
-                    try:
-                        # Receive data
-                        data = self.client_sock.recv(1024)
-                        if not data:
-                            break
-
-                        # Process the command
-                        command_str = data.decode('utf-8').strip()
-                        response = self.handle_command(command_str)
-
-                        # Send response
-                        self.client_sock.send(response.encode('utf-8') + b'\n')
-
-                    except bluetooth.btcommon.BluetoothError as e:
-                        logger.error(f"Bluetooth error: {str(e)}")
-                        break
-
-                # Close the client socket
-                if self.client_sock:
-                    self.client_sock.close()
-                    self.client_sock = None
-
+                while self.running:
+                    time.sleep(1)
             except KeyboardInterrupt:
-                logger.info("Server shutdown requested...")
-                self.running = False
-                break
-            except Exception as e:
-                logger.error(f"Error in server loop: {str(e)}")
-                time.sleep(1)  # Prevent tight loop on error
+                logger.info("Keyboard interrupt received. Shutting down...")
+                self.stop()
 
-    def cleanup(self):
-        """Clean up resources"""
-        logger.info("Cleaning up resources...")
+        except Exception as e:
+            logger.error(f"Error starting Bluetooth server: {str(e)}")
+            self.stop()
 
-        # Stop the command manager
+    def stop(self):
+        """Stop the Bluetooth server"""
+        logger.info("Stopping Bluetooth server...")
+        self.running = False
+
+        if self.server:
+            self.server.stop()
+            self.server = None
+
+        # Clean up command manager
         if self.manager.commands:
-            if self.manager.commands.state.vision_task:
+            if hasattr(self.manager.commands, 'state') and hasattr(self.manager.commands.state,
+                                                                   'vision_task') and self.manager.commands.state.vision_task:
                 self.manager.commands.stop_vision()
             self.manager.commands.cancel_movement()
 
-        # Close sockets
-        if self.client_sock:
-            self.client_sock.close()
-        if self.server_sock:
-            self.server_sock.close()
-
         # Stop the event loop
         self.manager.loop.call_soon_threadsafe(self.manager.loop.stop)
-        self.manager.thread.join()
-
-        logger.info("Cleanup complete")
+        self.manager.thread.join(2)  # Wait up to 2 seconds
 
 
 def main():
     """Main function"""
     try:
-        # Create and run the server
-        server = BluetoothServer()
-        server.run()
+        # Create and start the server
+        server = BluedotServer()
+        server.start()
     except KeyboardInterrupt:
         print("\nShutting down server...")
     except Exception as e:
         logger.error(f"Error in main: {str(e)}")
     finally:
         if 'server' in locals():
-            server.cleanup()
+            server.stop()
 
 
 if __name__ == "__main__":
