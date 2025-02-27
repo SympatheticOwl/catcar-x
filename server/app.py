@@ -102,7 +102,7 @@ def scan_command():
         )
 
         # Get the result with timeout
-        result = future.result(timeout=15)
+        result = future.result(timeout=30)
 
         # Return scan result which includes visualization data
         return jsonify(result)

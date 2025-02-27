@@ -83,6 +83,7 @@ class Commands:
         return self.state.current_distance
 
     # TODO: set speed state
+    # TODO: fix error
     def forward(self):
         if self.state.emergency_stop_flag:
             print('hazard detected ahead, unable to move')
