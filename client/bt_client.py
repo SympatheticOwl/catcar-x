@@ -67,7 +67,8 @@ class BTCarClient:
             logger.info(f"Connecting to Raspberry Pi at {self.server_mac}...")
             self.client = BluetoothClient(
                 self.server_mac,
-                data_received_callback=self._data_received
+                data_received_callback=self._data_received,
+                port=2
             )
             self.connected = True
             global bt_connected
