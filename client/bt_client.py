@@ -126,6 +126,7 @@ class BTCarClient:
             try:
                 # Get command from queue with timeout
                 cmd = cmd_queue.get(timeout=1)
+                print(f'running command {cmd}')
 
                 # Send command to Pi
                 self.client.send(json.dumps(cmd))
@@ -166,6 +167,7 @@ class BTCarClient:
             "params": params or {}
         }
 
+        print(f'adding command {cmd}')
         cmd_queue.put(cmd)
         return True
 
