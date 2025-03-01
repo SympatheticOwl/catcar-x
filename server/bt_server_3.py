@@ -186,16 +186,15 @@ class PicarXBluetoothServer:
                         "message": "Cannot move forward due to hazard"
                     })
 
-                # Use call_soon_threadsafe to schedule task creation in the event loop
-                self.manager.loop.call_soon_threadsafe(
-                    lambda: setattr(
-                        self.manager.commands.state,
-                        'movement_task',
-                        self.manager.loop.create_task(
-                            self.manager.commands.px.forward(self.manager.commands.state.speed)
-                        )
-                    )
-                )
+                # Do the forward movement synchronously
+                try:
+                    # Direct call to the motor functions instead of creating a task
+                    self.manager.commands.px.set_dir_servo_angle(0)  # Straighten wheels
+                    self.manager.commands.px.forward(self.manager.commands.state.speed)
+                    self.manager.commands.state.is_moving = True
+                except Exception as e:
+                    print(f"Forward movement error: {e}")
+
                 return json.dumps({
                     "status": "success",
                     "message": "Moving forward"
@@ -205,16 +204,15 @@ class PicarXBluetoothServer:
                 # Reset emergency stop flag
                 self.manager.commands.state.emergency_stop_flag = False
 
-                # Use call_soon_threadsafe to schedule task creation in the event loop
-                self.manager.loop.call_soon_threadsafe(
-                    lambda: setattr(
-                        self.manager.commands.state,
-                        'movement_task',
-                        self.manager.loop.create_task(
-                            self.manager.commands.px.backward(self.manager.commands.state.speed)
-                        )
-                    )
-                )
+                # Do the backward movement synchronously
+                try:
+                    # Direct call to the motor functions
+                    self.manager.commands.px.set_dir_servo_angle(0)  # Straighten wheels
+                    self.manager.commands.px.backward(self.manager.commands.state.speed)
+                    self.manager.commands.state.is_moving = True
+                except Exception as e:
+                    print(f"Backward movement error: {e}")
+
                 return json.dumps({
                     "status": "success",
                     "message": "Moving backward"
@@ -238,13 +236,19 @@ class PicarXBluetoothServer:
 
             elif cmd == "stop":
                 # This is a synchronous call, no need for event loop
-                self.manager.commands.cancel_movement()
+                try:
+                    self.manager.commands.cancel_movement()
+                    self.manager.commands.px.stop()
+                    self.manager.commands.state.is_moving = False
 
-                # Additionally, make sure any active task is cancelled in the event loop
-                self.manager.loop.call_soon_threadsafe(
-                    lambda: self.manager.commands.state.movement_task.cancel()
-                    if self.manager.commands.state.movement_task else None
-                )
+                    # Additionally, make sure any active task is cancelled in the event loop
+                    if self.manager.commands.state.movement_task:
+                        self.manager.loop.call_soon_threadsafe(
+                            self.manager.commands.state.movement_task.cancel
+                        )
+                        self.manager.commands.state.movement_task = None
+                except Exception as e:
+                    print(f"Stop movement error: {e}")
 
                 return json.dumps({
                     "status": "success",
