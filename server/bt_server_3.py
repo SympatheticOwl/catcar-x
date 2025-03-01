@@ -3,9 +3,28 @@ import json
 import base64
 import threading
 import asyncio
-import time
+import numpy as np
 from bluedot.btcomm import BluetoothServer
 from commands import Commands  # Assuming commands.py contains the Commands class
+
+
+def numpy_json_encoder(obj):
+    """Custom JSON encoder for NumPy objects"""
+    if isinstance(obj, (np.integer, np.int32, np.int64)):
+        return int(obj)
+    elif isinstance(obj, (np.floating, np.float32, np.float64)):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, np.bool_):
+        return bool(obj)
+    else:
+        try:
+            return obj.tolist()  # Try to convert any other numpy objects
+        except:
+            pass
+    return None  # Let default encoder handle it
+
 
 # Set environment variables (same as in the Flask app)
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'  # Tell Qt to not use GUI
@@ -102,21 +121,24 @@ class PicarXBluetoothServer:
             print(f"Received command: {endpoint}/{cmd} with params: {params}")
 
             # Handle different command types
+            response = None
             if endpoint == 'command':
-                return self.handle_command(cmd, params)
+                response = self.handle_command(cmd, params)
             elif endpoint == 'status':
-                return self.handle_status()
+                response = self.handle_status()
             elif endpoint == 'world-state':
-                return self.handle_world_state()
+                response = self.handle_world_state()
             elif endpoint == 'visualization':
-                return self.handle_visualization()
+                response = self.handle_visualization()
             elif endpoint == 'video-feed':
-                return self.handle_video_feed(params)
+                response = self.handle_video_feed(params)
             else:
-                return json.dumps({
+                response = json.dumps({
                     "status": "error",
                     "message": f"Unknown endpoint: {endpoint}"
                 })
+
+            return response
         except json.JSONDecodeError:
             return json.dumps({
                 "status": "error",
@@ -148,7 +170,7 @@ class PicarXBluetoothServer:
                 )
                 try:
                     result = future.result(timeout=30)
-                    return json.dumps(result)
+                    return json.dumps(result, default=numpy_json_encoder)
                 except asyncio.TimeoutError:
                     return json.dumps({
                         "status": "error",
@@ -294,9 +316,9 @@ class PicarXBluetoothServer:
             })
 
         return json.dumps({
-            "object_distance": self.manager.commands.get_object_distance(),
-            "emergency_stop": self.manager.commands.state.emergency_stop_flag
-        })
+            "object_distance": float(self.manager.commands.get_object_distance()),
+            "emergency_stop": bool(self.manager.commands.state.emergency_stop_flag)
+        }, default=numpy_json_encoder)
 
     def handle_world_state(self):
         """Handle world-state endpoint"""
@@ -308,7 +330,7 @@ class PicarXBluetoothServer:
 
         return json.dumps({
             "state": self.manager.commands.world_state()
-        })
+        }, default=numpy_json_encoder)
 
     def handle_visualization(self):
         """Handle visualization endpoint"""
@@ -334,7 +356,7 @@ class PicarXBluetoothServer:
                     "grid_data": visualization_data['grid_data'],
                     "plot_image": visualization_data['visualization']
                 }
-            })
+            }, default=numpy_json_encoder)
         except Exception as e:
             import traceback
             traceback.print_exc()
