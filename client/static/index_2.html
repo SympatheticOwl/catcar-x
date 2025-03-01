@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PicarX Bluetooth Controller</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+
+        .connection-panel {
+            background-color: #fff;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            width: 300px;
+            margin: 20px auto;
+        }
+
+        .controls button {
+            padding: 20px;
+            font-size: 18px;
+            cursor: pointer;
+            background-color: #4a90e2;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            transition: background-color 0.2s;
+        }
+
+        .controls button:hover {
+            background-color: #3a80d2;
+        }
+
+        .controls button:active {
+            background-color: #2a70c2;
+        }
+
+        .button-row {
+            text-align: center;
+            margin: 15px 0;
+        }
+
+        .button-row button {
+            padding: 10px 15px;
+            margin: 0 5px;
+            background-color: #4a90e2;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .button-row button:hover {
+            background-color: #3a80d2;
+        }
+
+        .button-row button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+
+        #up {
+            grid-column: 2;
+        }
+
+        #left {
+            grid-column: 1;
+            grid-row: 2;
+        }
+
+        #right {
+            grid-column: 3;
+            grid-row: 2;
+        }
+
+        #down {
+            grid-column: 2;
+            grid-row: 3;
+        }
+
+        #videoContainer {
+            margin: 20px auto;
+            text-align: center;
+            background-color: #fff;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        #videoFeed {
+            max-width: 100%;
+            margin-top: 10px;
+            border-radius: 4px;
+        }
+
+        #status {
+            margin: 20px 0;
+            padding: 10px;
+            border-radius: 4px;
+            background-color: #fff;
+            border-left: 4px solid #4a90e2;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        #mapContainer {
+            background-color: #fff;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px auto;
+            max-width: 600px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        #mapVisualization {
+            max-width: 100%;
+            border-radius: 4px;
+            margin-top: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        #asciiMap {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            white-space: pre;
+            overflow-x: auto;
+            font-family: monospace;
+        }
+
+        input[type="text"] {
+            padding: 8px;
+            width: 60%;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        .connected {
+            color: #28a745;
+            font-weight: bold;
+        }
+
+        .disconnected {
+            color: #dc3545;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+<h1>PicarX Bluetooth Controller</h1>
+
+<div class="connection-panel">
+    <h2>Connection</h2>
+    <div id="connectionStatus" class="disconnected">Status: Disconnected</div>
+    <div class="button-row">
+        <input type="text" id="btAddress" placeholder="Raspberry Pi Bluetooth address (e.g., 00:11:22:33:44:55)">
+        <button id="connectButton">Connect</button>
+        <button id="disconnectButton" disabled>Disconnect</button>
+    </div>
+</div>
+
+<div id="status">Status: Ready</div>
+
+<div class="controls">
+    <button id="up" disabled>↑</button>
+    <button id="left" disabled>←</button>
+    <button id="right" disabled>→</button>
+    <button id="down" disabled>↓</button>
+</div>
+
+<div class="button-row">
+    <button id="scanEnv" disabled>Scan Environment</button>
+</div>
+
+<div class="button-row">
+    <button id="toggleVideo" disabled>Start Video Feed</button>
+</div>
+
+<div id="videoContainer">
+    <img id="videoFeed" style="display: none;">
+</div>
+
+<div id="mapContainer" style="margin: 20px auto; text-align: center;">
+    <h2>Environment Map</h2>
+    <img id="mapVisualization" style="max-width: 100%; margin-top: 10px;">
+    <pre id="asciiMap" style="text-align: left; font-family: monospace; overflow-x: auto;"></pre>
+</div>
+
+<script>
+    // Use the local client bridge server URL
+    const API_URL = window.location.origin; // e.g., http://localhost:8080
+    const status = document.getElementById('status');
+    const videoFeed = document.getElementById('videoFeed');
+    const btAddress = document.getElementById('btAddress');
+    const connectButton = document.getElementById('connectButton');
+    const disconnectButton = document.getElementById('disconnectButton');
+    const connectionStatus = document.getElementById('connectionStatus');
+
+    let isConnected = false;
+    let isVideoActive = false;
+    let videoInterval;
+
+    // Connect to the Raspberry Pi via Bluetooth
+    connectButton.addEventListener('click', async function() {
+        const address = btAddress.value.trim();
+        if (!address) {
+            status.textContent = 'Status: Please enter a Bluetooth address';
+            return;
+        }
+
+        try {
+            status.textContent = 'Status: Connecting...';
+            const response = await fetch(`${API_URL}/connect`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ bt_address: address })
+            });
+
+            const data = await response.json();
+
+            if (data.status === 'success') {
+                isConnected = true;
+                connectionStatus.textContent = 'Status: Connected';
+                connectionStatus.className = 'connected';
+                status.textContent = `Status: ${data.message}`;
+
+                // Enable control buttons
+                document.querySelectorAll('.controls button, #scanEnv, #toggleVideo').forEach(button => {
+                    button.disabled = false;
+                });
+
+                connectButton.disabled = true;
+                disconnectButton.disabled = false;
+
+                // Save address for future use
+                localStorage.setItem('picarx_bt_address', address);
+            } else {
+                status.textContent = `Status: ${data.message}`;
+            }
+        } catch (error) {
+            status.textContent = `Error: ${error.message}`;
+        }
+    });
+
+    // Disconnect from the Raspberry Pi
+    disconnectButton.addEventListener('click', async function() {
+        try {
+            const response = await fetch(`${API_URL}/disconnect`, {
+                method: 'POST'
+            });
+
+            const data = await response.json();
+
+            isConnected = false;
+            connectionStatus.textContent = 'Status: Disconnected';
+            connectionStatus.className = 'disconnected';
+            status.textContent = `Status: ${data.message}`;
+
+            // Disable control buttons
+            document.querySelectorAll('.controls button, #scanEnv, #toggleVideo').forEach(button => {
+                button.disabled = true;
+            });
+
+            // Stop video if active
+            if (isVideoActive) {
+                clearInterval(videoInterval);
+                videoFeed.style.display = 'none';
+                document.getElementById('toggleVideo').textContent = 'Start Video Feed';
+                isVideoActive = false;
+            }
+
+            connectButton.disabled = false;
+            disconnectButton.disabled = true;
+        } catch (error) {
+            status.textContent = `Error: ${error.message}`;
+        }
+    });
+
+    // Helper function for making API calls
+    async function sendCommand(cmd, options = {}) {
+        if (!isConnected) {
+            status.textContent = 'Status: Not connected to Raspberry Pi';
+            return;
+        }
+
+        try {
+            const queryString = options.angle ? `?angle=${options.angle}` : '';
+            const response = await fetch(`${API_URL}/command/${cmd}${queryString}`, {
+                method: 'POST'
+            });
+            const data = await response.json();
+            status.textContent = `Status: ${data.message || data.status}`;
+            return data;
+        } catch (error) {
+            status.textContent = `Error: ${error.message}`;
+            throw error;
+        }
+    }
+
+    // Handle button press and release
+    function setupButton(id, pressCommand, angle = null) {
+        const button = document.getElementById(id);
+
+        // Touch events
+        button.addEventListener('touchstart', async (e) => {
+            e.preventDefault();
+            await sendCommand(pressCommand, { angle });
+        });
+
+        button.addEventListener('touchend', async (e) => {
+            e.preventDefault();
+            await sendCommand('stop');
+        });
+
+        // Mouse events
+        button.addEventListener('mousedown', async () => {
+            await sendCommand(pressCommand, { angle });
+        });
+
+        button.addEventListener('mouseup', async () => {
+            await sendCommand('stop');
+        });
+
+        // Prevent stuck movement if mouse leaves button while pressed
+        button.addEventListener('mouseleave', async () => {
+            await sendCommand('stop');
+        });
+    }
+
+    // Setup control buttons
+    setupButton('up', 'forward');
+    setupButton('down', 'backward');
+    setupButton('left', 'left', -30);
+    setupButton('right', 'right', 30);
+
+    // Video feed handling
+    document.getElementById('toggleVideo').addEventListener('click', async function() {
+        if (!isConnected) {
+            status.textContent = 'Status: Not connected to Raspberry Pi';
+            return;
+        }
+
+        if (!isVideoActive) {
+            // Start video
+            const response = await sendCommand('see');
+            if (response && response.status === 'success') {
+                videoFeed.style.display = 'block';
+                this.textContent = 'Stop Video Feed';
+
+                // Set video feed source directly to the streaming endpoint
+                const timestamp = new Date().getTime();
+                videoFeed.src = `${API_URL}/video_feed?t=${timestamp}`;
+
+                isVideoActive = true;
+            }
+        } else {
+            // Stop video
+            await sendCommand('blind');
+            videoFeed.style.display = 'none';
+            this.textContent = 'Start Video Feed';
+            isVideoActive = false;
+        }
+    });
+
+    // Scan environment button
+    document.getElementById('scanEnv').addEventListener('click', async function() {
+        if (!isConnected) {
+            status.textContent = 'Status: Not connected to Raspberry Pi';
+            return;
+        }
+
+        try {
+            // Show loading state
+            this.disabled = true;
+            status.textContent = 'Status: Scanning environment...';
+
+            // Get the scan data
+            const response = await sendCommand('scan');
+
+            if (response && response.status === 'success') {
+                // Display the matplotlib visualization
+                const mapImg = document.getElementById('mapVisualization');
+                mapImg.src = `data:image/png;base64,${response.data.plot_image}`;
+
+                // Display the ASCII map
+                const asciiMap = document.getElementById('asciiMap');
+                if (response.data.grid_data && response.data.grid_data.grid) {
+                    // Create ASCII representation
+                    const grid = response.data.grid_data.grid;
+                    const asciiRepresentation = grid.map(row =>
+                        row.map(cell => cell === 2 ? 'C' : cell === 1 ? '#' : '.').join('')
+                    ).join('\n');
+                    asciiMap.textContent = asciiRepresentation;
+                }
+
+                status.textContent = 'Status: Scan complete';
+            } else {
+                status.textContent = `Status: Error - ${response.message || 'Scan failed'}`;
+            }
+        } catch (error) {
+            status.textContent = `Error: ${error.message}`;
+        } finally {
+            this.disabled = false;
+        }
+    });
+
+    // Keyboard controls
+    document.addEventListener('keydown', async function(event) {
+        if (!isConnected) return;
+
+        switch(event.key) {
+            case 'ArrowUp':
+                event.preventDefault();
+                document.getElementById('up').classList.add('active');
+                await sendCommand('forward');
+                break;
+            case 'ArrowDown':
+                event.preventDefault();
+                document.getElementById('down').classList.add('active');
+                await sendCommand('backward');
+                break;
+            case 'ArrowLeft':
+                event.preventDefault();
+                document.getElementById('left').classList.add('active');
+                await sendCommand('left', { angle: -30 });
+                break;
+            case 'ArrowRight':
+                event.preventDefault();
+                document.getElementById('right').classList.add('active');
+                await sendCommand('right', { angle: 30 });
+                break;
+        }
+    });
+
+    document.addEventListener('keyup', async function(event) {
+        if (!isConnected) return;
+
+        switch(event.key) {
+            case 'ArrowUp':
+            case 'ArrowDown':
+            case 'ArrowLeft':
+            case 'ArrowRight':
+                event.preventDefault();
+                document.querySelectorAll('.controls button').forEach(btn => {
+                    btn.classList.remove('active');
+                });
+                await sendCommand('stop');
+                break;
+        }
+    });
+
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', async () => {
+        if (isConnected) {
+            try {
+                // Stop any movement
+                await sendCommand('stop');
+
+                // Stop video if active
+                if (isVideoActive) {
+                    await sendCommand('blind');
+                }
+
+                // Disconnect
+                await fetch(`${API_URL}/disconnect`, {
+                    method: 'POST'
+                });
+            } catch (error) {
+                console.error('Error during cleanup:', error);
+            }
+        }
+    });
+
+    // Auto-load the last used Bluetooth address
+    document.addEventListener('DOMContentLoaded', function() {
+        const savedAddress = localStorage.getItem('picarx_bt_address');
+        if (savedAddress) {
+            btAddress.value = savedAddress;
+        }
+    });
+
+    // Add periodic status check for connection monitoring
+    function checkStatus() {
+        if (isConnected) {
+            fetch(`${API_URL}/status`)
+                .then(response => response.json())
+                .then(data => {
+                    // Update status indicators if needed based on response
+                    if (data.emergency_stop) {
+                        status.textContent = 'Status: Emergency stop active';
+                        status.style.borderLeftColor = '#dc3545';
+                    } else {
+                        status.style.borderLeftColor = '#4a90e2';
+                    }
+                })
+                .catch(error => {
+                    console.error('Status check failed:', error);
+                    // If status check fails multiple times, consider disconnected
+                    if (isConnected) {
+                        statusFailCount++;
+                        if (statusFailCount > 3) {
+                            connectionStatus.textContent = 'Status: Connection lost';
+                            connectionStatus.className = 'disconnected';
+                            isConnected = false;
+
+                            // Disable control buttons
+                            document.querySelectorAll('.controls button, #scanEnv, #toggleVideo').forEach(button => {
+                                button.disabled = true;
+                            });
+
+                            connectButton.disabled = false;
+                            disconnectButton.disabled = true;
+                        }
+                    }
+                });
+        }
+    }
+
+    let statusFailCount = 0;
+    // Check status every 5 seconds
+    setInterval(checkStatus, 5000);
+</script>
+</body>
+</html>

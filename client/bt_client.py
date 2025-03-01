@@ -68,7 +68,8 @@ class BTCarClient:
             # Initialize the client with a callback
             self.client = BluetoothClient(
                 self.server_mac,
-                data_received_callback=self._data_received
+                data_received_callback=self._data_received,
+                port=2
             )
 
             # The client is now connected
