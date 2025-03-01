@@ -63,8 +63,8 @@ class PicarXBluetoothServer:
                                       port=2)
         self.video_active = False
         self.video_thread = None
-        print(f"Bluetooth server started. Device name: {self.server.server_name}")
-        print(f"The server is discoverable as '{self.server.server_name}'")
+        print(f"Bluetooth server started. Device name: {self.server.server_address}")
+        print(f"The server is discoverable as '{self.server.server_address}'")
 
     def client_connected(self, client_address):
         print(f"Client connected: {client_address}")
