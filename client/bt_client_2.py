@@ -1,3 +1,4 @@
+import base64
 import os
 import json
 import time
@@ -77,13 +78,25 @@ class PicarXBridge:
                 try:
                     # If queue is full, remove oldest frame
                     if self.frame_queue.full():
-                        self.frame_queue.get_nowait()
+                        try:
+                            self.frame_queue.get_nowait()
+                        except queue.Empty:
+                            pass
                     self.frame_queue.put_nowait(response['frame'])
-                except:
-                    pass
+                except Exception as e:
+                    print(f"Error adding frame to queue: {e}")
             else:
                 # Put other responses in the response queue
-                self.response_queue.put(response)
+                try:
+                    self.response_queue.put(response, block=False)
+                except queue.Full:
+                    # If queue is full, clear it and add the new response
+                    while not self.response_queue.empty():
+                        try:
+                            self.response_queue.get_nowait()
+                        except queue.Empty:
+                            break
+                    self.response_queue.put(response)
 
         except json.JSONDecodeError:
             print(f"Invalid JSON received: {data[:100]}...")
@@ -106,8 +119,20 @@ class PicarXBridge:
                 "params": params
             }
 
+            # Clear the queue to prevent stale responses
+            while not self.response_queue.empty():
+                try:
+                    self.response_queue.get_nowait()
+                except queue.Empty:
+                    break
+
             # Send the command
             self.client.send(json.dumps(command))
+
+            # For movement commands, don't wait for response
+            if endpoint == 'command' and cmd in ['forward', 'backward', 'left', 'right', 'stop']:
+                # Return a default response immediately for movement commands
+                return {"status": "success", "message": f"Sent {cmd} command"}
 
             # Wait for response with timeout
             try:
@@ -128,7 +153,7 @@ bridge = PicarXBridge()
 @app.route('/')
 def index():
     """Serve the main HTML page"""
-    return send_from_directory('static', 'index_2.html')
+    return send_from_directory('static', 'index.html')
 
 
 @app.route('/connect', methods=['POST'])
@@ -205,6 +230,9 @@ def get_visualization():
 
 def generate_frames():
     """Generator function for video streaming"""
+    last_frame_time = time.time()
+    no_frame_count = 0
+
     while True:
         if not bridge.connected:
             yield b'--frame\r\n'
@@ -214,23 +242,51 @@ def generate_frames():
             continue
 
         try:
-            # Try to get a frame from the queue
-            frame_data = bridge.frame_queue.get(timeout=0.5)
-            frame = frame_data.encode('utf-8')
+            # Try to get a frame from the queue with a short timeout
+            try:
+                frame_base64 = bridge.frame_queue.get(timeout=0.2)
+                no_frame_count = 0  # Reset counter when we get a frame
 
-            yield b'--frame\r\n'
-            yield b'Content-Type: image/jpeg\r\n\r\n'
-            yield frame
-            yield b'\r\n'
-        except queue.Empty:
-            # If no frame is available, send a placeholder
-            yield b'--frame\r\n'
-            yield b'Content-Type: text/plain\r\n\r\n'
-            yield b'Waiting for video...\r\n'
-            time.sleep(0.1)
+                # Decode base64 frame
+                try:
+                    frame_bytes = base64.b64decode(frame_base64)
+
+                    # Send the frame
+                    yield b'--frame\r\n'
+                    yield b'Content-Type: image/jpeg\r\n\r\n'
+                    yield frame_bytes
+                    yield b'\r\n'
+
+                    # Rate limit frame delivery (max 10 fps to client)
+                    current_time = time.time()
+                    if current_time - last_frame_time < 0.1:  # 100ms = 10fps
+                        time.sleep(0.1 - (current_time - last_frame_time))
+                    last_frame_time = time.time()
+
+                except Exception as e:
+                    print(f"Frame decoding error: {e}")
+                    yield b'--frame\r\n'
+                    yield b'Content-Type: text/plain\r\n\r\n'
+                    yield f'Frame error: {str(e)[:50]}...\r\n'.encode('utf-8')
+                    time.sleep(0.5)
+
+            except queue.Empty:
+                # If no frame is available after timeout
+                no_frame_count += 1
+
+                if no_frame_count > 5:  # After ~1 second of no frames
+                    yield b'--frame\r\n'
+                    yield b'Content-Type: text/plain\r\n\r\n'
+                    yield b'Waiting for video...\r\n'
+
+                time.sleep(0.2)
+
         except Exception as e:
             print(f"Error in frame generation: {e}")
-            time.sleep(0.1)
+            yield b'--frame\r\n'
+            yield b'Content-Type: text/plain\r\n\r\n'
+            yield f'Stream error: {str(e)[:50]}...\r\n'.encode('utf-8')
+            time.sleep(0.5)
 
 
 @app.route('/video_feed')

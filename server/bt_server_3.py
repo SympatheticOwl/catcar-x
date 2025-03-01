@@ -11,6 +11,7 @@ os.environ['QT_QPA_PLATFORM'] = 'offscreen'  # Tell Qt to not use GUI
 os.environ['OPENCV_VIDEOIO_PRIORITY_BACKEND'] = 'v4l2'  # Use V4L2 backend for OpenCV
 os.environ['MPLBACKEND'] = 'Agg'  # Force matplotlib to use Agg backend
 
+
 class AsyncCommandManager:
     def __init__(self):
         self.loop = asyncio.new_event_loop()
@@ -57,12 +58,19 @@ class PicarXBluetoothServer:
     def __init__(self):
         print("Initializing Bluetooth server for PicarX...")
         self.manager = AsyncCommandManager()
-        self.server = BluetoothServer(self.data_received,
-                                      when_client_connects=self.client_connected,
+        self.server = BluetoothServer(self.data_received, when_client_connects=self.client_connected,
                                       when_client_disconnects=self.client_disconnected,
-                                      port=2)
+                                      port=2,
+                                      auto_start=False)
         self.video_active = False
         self.video_thread = None
+
+        # Wait for manager to initialize
+        print("Waiting for AsyncCommandManager to initialize...")
+        time.sleep(3)  # Give time for the event loop to start and commands to initialize
+
+        # Start the server
+        self.server.start()
         print(f"Bluetooth server started. Device name: {self.server.server_address}")
         print(f"The server is discoverable as '{self.server.server_address}'")
 
@@ -71,6 +79,10 @@ class PicarXBluetoothServer:
 
     def client_disconnected(self, client_address):
         print(f"Client disconnected: {client_address}")
+        # Stop any active movement when client disconnects
+        if self.manager.commands:
+            self.manager.commands.cancel_movement()
+
         # Stop video streaming if active
         if self.video_active:
             self.video_active = False
@@ -128,23 +140,57 @@ class PicarXBluetoothServer:
         try:
             if cmd == 'scan':
                 # Handle scan command differently as it's a coroutine
-                result = self.manager.run_coroutine(self.manager.commands.scan_env())
-                return json.dumps(result)
+                # We need to run this in the event loop
+                future = asyncio.run_coroutine_threadsafe(
+                    self.manager.commands.scan_env(),
+                    self.manager.loop
+                )
+                try:
+                    result = future.result(timeout=30)
+                    return json.dumps(result)
+                except asyncio.TimeoutError:
+                    return json.dumps({
+                        "status": "error",
+                        "message": "Scan operation timed out"
+                    })
 
             elif cmd == "forward":
-                success = self.manager.commands.forward()
-                if not success:
+                # Check hazard flag without trying to create a task
+                if self.manager.commands.state.emergency_stop_flag:
                     return json.dumps({
                         "status": "error",
                         "message": "Cannot move forward due to hazard"
                     })
+
+                # Use call_soon_threadsafe to schedule task creation in the event loop
+                self.manager.loop.call_soon_threadsafe(
+                    lambda: setattr(
+                        self.manager.commands.state,
+                        'movement_task',
+                        self.manager.loop.create_task(
+                            self.manager.commands.px.forward(self.manager.commands.state.speed)
+                        )
+                    )
+                )
                 return json.dumps({
                     "status": "success",
                     "message": "Moving forward"
                 })
 
             elif cmd == "backward":
-                self.manager.commands.backward()
+                # Reset emergency stop flag
+                self.manager.commands.state.emergency_stop_flag = False
+
+                # Use call_soon_threadsafe to schedule task creation in the event loop
+                self.manager.loop.call_soon_threadsafe(
+                    lambda: setattr(
+                        self.manager.commands.state,
+                        'movement_task',
+                        self.manager.loop.create_task(
+                            self.manager.commands.px.backward(self.manager.commands.state.speed)
+                        )
+                    )
+                )
                 return json.dumps({
                     "status": "success",
                     "message": "Moving backward"
@@ -153,6 +199,8 @@ class PicarXBluetoothServer:
             elif cmd in ["left", "right"]:
                 # Get angle from params, default to ±30
                 angle = int(params.get('angle', 30 if cmd == "right" else -30))
+
+                # This is a synchronous call, no need for event loop
                 success = self.manager.commands.turn(angle)
                 if not success:
                     return json.dumps({
@@ -165,7 +213,15 @@ class PicarXBluetoothServer:
                 })
 
             elif cmd == "stop":
+                # This is a synchronous call, no need for event loop
                 self.manager.commands.cancel_movement()
+
+                # Additionally, make sure any active task is cancelled in the event loop
+                self.manager.loop.call_soon_threadsafe(
+                    lambda: self.manager.commands.state.movement_task.cancel()
+                    if self.manager.commands.state.movement_task else None
+                )
+
                 return json.dumps({
                     "status": "success",
                     "message": "Stopped movement"
@@ -180,6 +236,10 @@ class PicarXBluetoothServer:
                         self.manager.loop.create_task(self.manager.commands.vision.capture_and_detect())
                     )
                 )
+
+                # Give a short delay to allow the task to start
+                time.sleep(0.1)
+
                 objects = self.manager.commands.get_objects()
 
                 # Start video streaming in a separate thread
@@ -195,9 +255,16 @@ class PicarXBluetoothServer:
                 })
 
             elif cmd == "blind":
-                # Stop vision task
+                # Stop vision task using the event loop
+                self.manager.loop.call_soon_threadsafe(
+                    lambda: self.manager.commands.state.vision_task.cancel()
+                    if self.manager.commands.state.vision_task else None
+                )
+
+                # This is a synchronous call
                 self.manager.commands.stop_vision()
                 self.video_active = False
+
                 return json.dumps({
                     "status": "success",
                     "message": "Vision system stopped"
@@ -278,19 +345,55 @@ class PicarXBluetoothServer:
     def stream_video(self):
         """Stream video frames over Bluetooth"""
         try:
-            while self.video_active and self.manager.commands:
-                frame = self.manager.commands.vision.get_latest_frame_jpeg()
-                if frame is not None:
-                    # Encode frame as base64 and send with a type indicator
-                    frame_data = {
-                        "type": "video_frame",
-                        "frame": base64.b64encode(frame).decode('utf-8')
-                    }
-                    self.server.send(json.dumps(frame_data))
+            frame_count = 0
+            last_frame_time = time.time()
 
-                # Add a delay to control frame rate (adjust as needed)
-                import time
-                time.sleep(0.1)  # Lower frame rate for Bluetooth bandwidth
+            while self.video_active and self.manager.commands:
+                current_time = time.time()
+
+                # Get frame if enough time has passed (limit to about 5 fps for Bluetooth)
+                if current_time - last_frame_time >= 0.2:  # 200ms between frames = 5fps
+                    frame = self.manager.commands.vision.get_latest_frame_jpeg()
+                    if frame is not None:
+                        # Compress frame more aggressively for Bluetooth transmission
+                        try:
+                            import cv2
+                            import numpy as np
+                            # Decode JPEG to image
+                            nparr = np.frombuffer(frame, np.uint8)
+                            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+                            # Resize to smaller dimensions for Bluetooth
+                            img_small = cv2.resize(img, (320, 240))
+
+                            # Encode with higher compression
+                            _, compressed_frame = cv2.imencode('.jpg', img_small, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                            frame = compressed_frame.tobytes()
+                        except Exception as e:
+                            print(f"Frame compression error: {e}")
+                            # Continue with original frame if compression fails
+
+                        # Encode frame as base64 and send with a type indicator
+                        frame_data = {
+                            "type": "video_frame",
+                            "frame": base64.b64encode(frame).decode('utf-8')
+                        }
+
+                        try:
+                            self.server.send(json.dumps(frame_data))
+                            frame_count += 1
+
+                            # Print stats occasionally
+                            if frame_count % 20 == 0:
+                                print(f"Sent {frame_count} frames, latest size: {len(frame)} bytes")
+                        except Exception as e:
+                            print(f"Frame send error: {e}")
+
+                        last_frame_time = current_time
+
+                # Short sleep to prevent CPU hogging
+                time.sleep(0.05)
+
         except Exception as e:
             print(f"Video streaming error: {e}")
             self.video_active = False

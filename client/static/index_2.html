@@ -321,30 +321,51 @@
     // Handle button press and release
     function setupButton(id, pressCommand, angle = null) {
         const button = document.getElementById(id);
+        let isPressed = false;
 
         // Touch events
         button.addEventListener('touchstart', async (e) => {
             e.preventDefault();
-            await sendCommand(pressCommand, { angle });
+            if (!isPressed) {
+                isPressed = true;
+                button.classList.add('active');
+                await sendCommand(pressCommand, { angle });
+            }
         });
 
         button.addEventListener('touchend', async (e) => {
             e.preventDefault();
-            await sendCommand('stop');
+            if (isPressed) {
+                isPressed = false;
+                button.classList.remove('active');
+                await sendCommand('stop');
+            }
         });
 
         // Mouse events
         button.addEventListener('mousedown', async () => {
-            await sendCommand(pressCommand, { angle });
+            if (!isPressed) {
+                isPressed = true;
+                button.classList.add('active');
+                await sendCommand(pressCommand, { angle });
+            }
         });
 
         button.addEventListener('mouseup', async () => {
-            await sendCommand('stop');
+            if (isPressed) {
+                isPressed = false;
+                button.classList.remove('active');
+                await sendCommand('stop');
+            }
         });
 
         // Prevent stuck movement if mouse leaves button while pressed
         button.addEventListener('mouseleave', async () => {
-            await sendCommand('stop');
+            if (isPressed) {
+                isPressed = false;
+                button.classList.remove('active');
+                await sendCommand('stop');
+            }
         });
     }
 
@@ -492,13 +513,27 @@
         }
     });
 
-    // Auto-load the last used Bluetooth address
-    document.addEventListener('DOMContentLoaded', function() {
-        const savedAddress = localStorage.getItem('picarx_bt_address');
-        if (savedAddress) {
-            btAddress.value = savedAddress;
+    // Add some CSS to show active button states
+    document.head.insertAdjacentHTML('beforeend', `
+    <style>
+        .controls button.active {
+            background-color: #2a70c2;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.3);
+            transform: scale(0.95);
         }
-    });
+
+        /* Improve video container */
+        #videoFeed {
+            background-color: #f0f0f0;
+            min-height: 200px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #666;
+            font-style: italic;
+        }
+    </style>
+    `);
 
     // Add periodic status check for connection monitoring
     function checkStatus() {
