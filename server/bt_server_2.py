@@ -112,7 +112,7 @@ class CarBluetoothServer:
 
     def _data_received(self, data):
         """Handle data received from the client."""
-        print(f'data: {data}')
+        logger.info(f'data: {data}')
         try:
             # Parse JSON data
             cmd_data = json.loads(data)
