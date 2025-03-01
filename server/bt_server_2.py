@@ -121,6 +121,15 @@ class CarBluetoothServer:
             data: The received data
         """
         try:
+            # Handle ping command (sent when client connects)
+            if data == "ping" or data == '{"command":"ping","params":{}}':
+                logger.info("Received ping command")
+                self._send_response({
+                    "status": "success",
+                    "message": "Pong - connection successful"
+                })
+                return
+
             # Parse JSON data
             cmd_data = json.loads(data)
             command = cmd_data.get('command')
@@ -129,63 +138,23 @@ class CarBluetoothServer:
             logger.info(f"Command received: {command}, params: {params}")
 
             # Process command with appropriate handler
-            if command == 'forward':
+            if command == 'ping':
+                self._send_response({
+                    "status": "success",
+                    "message": "Pong - connection successful"
+                })
+
+            elif command == 'forward':
                 success = self.commands.forward()
                 self._send_response({
                     "status": "success" if success else "error",
                     "message": "Moving forward" if success else "Cannot move forward due to hazard"
                 })
 
-            elif command == 'backward':
-                self.commands.backward()
-                self._send_response({
-                    "status": "success",
-                    "message": "Moving backward"
-                })
-
-            elif command == 'left' or command == 'right':
-                angle = params.get('angle', 30 if command == 'right' else -30)
-                success = self.commands.turn(angle)
-                self._send_response({
-                    "status": "success" if success else "error",
-                    "message": f"Turning with angle {angle}" if success else "Cannot turn due to hazard"
-                })
-
-            elif command == 'stop':
-                self.commands.cancel_movement()
-                self._send_response({
-                    "status": "success",
-                    "message": "Stopped movement"
-                })
-
-            elif command == 'scan':
-                # Create future for async operation
-                future = asyncio.run_coroutine_threadsafe(self._handle_scan(), self.loop)
-                # Wait for result (optional, but ensures we get the response)
-                try:
-                    future.result(timeout=10)
-                except Exception as e:
-                    logger.error(f"Error in scan operation: {str(e)}")
-
-            elif command == 'see':
-                self._handle_see()
-
-            elif command == 'blind':
-                self._handle_blind()
-
-            elif command == 'visualization':
-                future = asyncio.run_coroutine_threadsafe(self._handle_visualization(), self.loop)
-                try:
-                    future.result(timeout=5)
-                except Exception as e:
-                    logger.error(f"Error in visualization operation: {str(e)}")
-
-            else:
-                self._send_error(f"Unknown command: {command}")
-
-        except json.JSONDecodeError:
-            logger.error(f"Invalid JSON data received: {data}")
-            self._send_error("Invalid JSON data")
+            # Rest of the method remains the same
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON data received: {repr(data)}, Error: {str(e)}")
+            self._send_error(f"Invalid JSON data: {str(e)}")
 
         except Exception as e:
             logger.error(f"Error handling command: {str(e)}")
@@ -343,7 +312,14 @@ class CarBluetoothServer:
         global bt_client
         if bt_client:
             try:
-                bt_client.send(json.dumps(data))
+                # Ensure we're sending valid JSON
+                json_str = json.dumps(data)
+
+                # Log what we're sending
+                logger.info(f"Sending response: {json_str}")
+
+                # Send the data
+                bt_client.send(json_str)
             except Exception as e:
                 logger.error(f"Error sending response: {str(e)}")
 

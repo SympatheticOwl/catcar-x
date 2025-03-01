@@ -116,6 +116,20 @@
         .indicator.connected {
             background-color: #4CAF50;
         }
+
+        .debug-info {
+            margin-top: 20px;
+            padding: 10px;
+            background: #f5f5f5;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -161,22 +175,54 @@
     <pre id="asciiMap" style="text-align: left;"></pre>
 </div>
 
+<div class="button-row">
+    <button id="toggleDebug">Show Debug Info</button>
+</div>
+
+<div id="debugInfo" class="debug-info"></div>
+
 <script>
     // API endpoint (local bridge server)
     const API_URL = window.location.origin;  // Use the same origin as the page
     const status = document.getElementById('status');
     const videoFeed = document.getElementById('videoFeed');
+    const debugInfo = document.getElementById('debugInfo');
     let isVideoActive = false;
     let connected = false;
+    let debugEnabled = false;
 
-    // Elements
-    const connectBtn = document.getElementById('connectBtn');
-    const disconnectBtn = document.getElementById('disconnectBtn');
-    const macAddressInput = document.getElementById('macAddress');
-    const connectionIndicator = document.getElementById('connectionIndicator');
-    const controlButtons = document.querySelectorAll('.controls button');
-    const scanEnvBtn = document.getElementById('scanEnv');
-    const toggleVideoBtn = document.getElementById('toggleVideo');
+    // Debug logging
+    function logDebug(message, data = null) {
+        const timestamp = new Date().toISOString();
+        let logMessage = `${timestamp}: ${message}`;
+
+        if (data) {
+            try {
+                if (typeof data === 'object') {
+                    logMessage += '\n' + JSON.stringify(data, null, 2);
+                } else {
+                    logMessage += '\n' + data;
+                }
+            } catch (e) {
+                logMessage += '\nError stringifying data: ' + e.message;
+            }
+        }
+
+        if (debugEnabled) {
+            console.log(logMessage);
+            debugInfo.innerHTML = logMessage + '\n\n' + debugInfo.innerHTML;
+            if (debugInfo.innerHTML.length > 10000) {
+                debugInfo.innerHTML = debugInfo.innerHTML.substring(0, 10000) + '...';
+            }
+        }
+    }
+
+    // Toggle debug display
+    document.getElementById('toggleDebug').addEventListener('click', function() {
+        debugEnabled = !debugEnabled;
+        debugInfo.style.display = debugEnabled ? 'block' : 'none';
+        this.textContent = debugEnabled ? 'Hide Debug Info' : 'Show Debug Info';
+    });
 
     // Helper function for making API calls
     async function sendCommand(cmd, options = {}) {
@@ -189,6 +235,8 @@
             const url = `${API_URL}/${cmd.startsWith('connect') || cmd.startsWith('disconnect') ? cmd : 'command/' + cmd}`;
             const params = options.angle ? `?angle=${options.angle}` : '';
 
+            console.log(`Sending command: ${cmd} to ${url}${params}`);
+
             const response = await fetch(url + params, {
                 method: 'POST',
                 headers: {
@@ -197,15 +245,59 @@
                 body: options.body ? JSON.stringify(options.body) : null
             });
 
-            const data = await response.json();
-            status.textContent = `Status: ${data.message || 'Command sent'}`;
-            return data;
+            // Check if the response was successful
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            // Check content type to make sure it's JSON
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                console.warn('Response is not JSON, getting text instead');
+                const text = await response.text();
+                console.log('Raw response:', text);
+
+                // Try to convert to JSON if it looks like JSON
+                const trimmed = text.trim();
+                if (trimmed && (trimmed.startsWith('{') || trimmed.startsWith('['))) {
+                    try {
+                        const data = JSON.parse(trimmed);
+                        status.textContent = `Status: ${data.message || 'Command sent'}`;
+                        return data;
+                    } catch (e) {
+                        console.error('Failed to parse JSON from text:', e);
+                    }
+                }
+
+                // Return a simple object if we can't parse JSON
+                return { status: 'unknown', message: text || 'Command sent' };
+            }
+
+            // Parse JSON response
+            try {
+                const data = await response.json();
+                status.textContent = `Status: ${data.message || 'Command sent'}`;
+                return data;
+            } catch (error) {
+                console.error('JSON parsing error:', error);
+                status.textContent = `Error: Failed to parse response`;
+                return null;
+            }
         } catch (error) {
-            status.textContent = `Error: ${error.message}`;
             console.error('API error:', error);
+            status.textContent = `Error: ${error.message}`;
             return null;
         }
     }
+
+    // Elements
+    const connectBtn = document.getElementById('connectBtn');
+    const disconnectBtn = document.getElementById('disconnectBtn');
+    const macAddressInput = document.getElementById('macAddress');
+    const connectionIndicator = document.getElementById('connectionIndicator');
+    const controlButtons = document.querySelectorAll('.controls button');
+    const scanEnvBtn = document.getElementById('scanEnv');
+    const toggleVideoBtn = document.getElementById('toggleVideo');
 
     // Setup bluetooth connection
     connectBtn.addEventListener('click', async () => {
@@ -280,7 +372,8 @@
         // Touch events
         button.addEventListener('touchstart', async (e) => {
             e.preventDefault();
-            await sendCommand(pressCommand, { angle });
+            const options = angle !== null ? { body: { angle: angle } } : {};
+            await sendCommand(pressCommand, options);
         });
 
         button.addEventListener('touchend', async (e) => {
@@ -290,7 +383,8 @@
 
         // Mouse events
         button.addEventListener('mousedown', async () => {
-            await sendCommand(pressCommand, { angle });
+            const options = angle !== null ? { body: { angle: angle } } : {};
+            await sendCommand(pressCommand, options);
         });
 
         button.addEventListener('mouseup', async () => {

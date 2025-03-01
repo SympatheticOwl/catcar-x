@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Fixed Bluetooth Bridge Server
-----------------------------
-This improved version fixes issues with command forwarding to the Bluetooth server.
+Debugged Bluetooth Bridge Server
+-------------------------------
+Improved Flask route handling to fix 400 Bad Request errors.
 """
 
 import os
@@ -13,6 +13,7 @@ import threading
 import logging
 import time
 import base64
+import traceback
 from typing import Dict, Any, Optional
 from queue import Queue, Empty
 from bluedot.btcomm import BluetoothClient
@@ -22,7 +23,7 @@ from flask_cors import CORS
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,  # Set to DEBUG for more detailed logs
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger("BT-Bridge")
@@ -67,8 +68,7 @@ class BTCarClient:
             # Initialize the client with a callback
             self.client = BluetoothClient(
                 self.server_mac,
-                data_received_callback=self._data_received,
-                port=2
+                data_received_callback=self._data_received
             )
 
             # The client is now connected
@@ -120,21 +120,41 @@ class BTCarClient:
         """
         try:
             # Log raw data for debugging
-            logger.debug(f"Raw data received: {data}")
+            logger.info(f"Raw data received: {repr(data)}")
+
+            # Skip empty data
+            if not data or data.isspace():
+                logger.warning("Received empty data, ignoring")
+                return
 
             # Check if it's a video frame (starts with "FRAME:")
-            if data.startswith("FRAME:"):
+            if isinstance(data, str) and data.startswith("FRAME:"):
                 global latest_frame
                 latest_frame = data[6:]  # Remove the "FRAME:" prefix
                 logger.debug("Received video frame")
             else:
                 # Try to parse as JSON response
                 try:
-                    response = json.loads(data)
-                    resp_queue.put(response)
-                    logger.info(f"Received response: {response}")
-                except json.JSONDecodeError:
-                    logger.warning(f"Received non-JSON data: {data}")
+                    # Make sure we have a string
+                    if not isinstance(data, str):
+                        data = str(data)
+
+                    # Clean the data - remove any leading/trailing whitespace
+                    data = data.strip()
+
+                    # Only try to parse if it looks like JSON
+                    if data and (data.startswith('{') or data.startswith('[')):
+                        response = json.loads(data)
+                        resp_queue.put(response)
+                        logger.info(f"Received JSON response: {response}")
+                    else:
+                        logger.warning(f"Received non-JSON data: {repr(data)}")
+                        # Put a simple acknowledgment in the response queue
+                        resp_queue.put({"status": "ack", "raw_data": data})
+                except json.JSONDecodeError as e:
+                    logger.warning(f"JSON decode error: {e}, Data: {repr(data)}")
+                    # Put an error response in the queue
+                    resp_queue.put({"status": "error", "message": f"Invalid JSON: {str(e)}"})
         except Exception as e:
             logger.error(f"Error processing received data: {str(e)}")
 
@@ -144,7 +164,6 @@ class BTCarClient:
             try:
                 # Get command from queue with timeout
                 cmd = cmd_queue.get(timeout=1)
-                logger.info(f"running command: {cmd}")
 
                 # Serialize the command to JSON if it's not already a string
                 if not isinstance(cmd, str):
@@ -181,7 +200,7 @@ class BTCarClient:
             True if command was queued successfully, False otherwise
         """
         if not self.connected:
-            logger.error("Cannot send command: Not connected to Raspberry Pi")
+            logger.error(f"Cannot send command '{command}': Not connected to Raspberry Pi")
             return False
 
         cmd = {
@@ -246,32 +265,58 @@ def connect():
             "message": "Already connected to Raspberry Pi"
         })
 
-    # Get MAC address from request or use default
-    data = request.json or {}
-    mac_address = data.get('mac')
+    # Get MAC address from request
+    try:
+        mac_address = None
 
-    if not mac_address and not bt_client:
+        # Try to get MAC from JSON body first
+        if request.is_json:
+            data = request.get_json()
+            mac_address = data.get('mac')
+            logger.debug(f"Got MAC from JSON: {mac_address}")
+
+        # If no MAC in JSON, try form data
+        if not mac_address and request.form:
+            mac_address = request.form.get('mac')
+            logger.debug(f"Got MAC from form: {mac_address}")
+
+        # If no MAC in form, check if we have an existing client
+        if not mac_address and bt_client:
+            mac_address = bt_client.server_mac
+            logger.debug(f"Using existing MAC: {mac_address}")
+
+        # If still no MAC, return error
+        if not mac_address:
+            logger.error("No MAC address provided in request")
+            return jsonify({
+                "status": "error",
+                "message": "No MAC address provided"
+            }), 400
+
+        # Create new client if needed
+        if not bt_client:
+            bt_client = BTCarClient(mac_address)
+
+        # Connect to Pi
+        success = bt_client.connect()
+
+        if success:
+            return jsonify({
+                "status": "success",
+                "message": "Connected to Raspberry Pi"
+            })
+        else:
+            return jsonify({
+                "status": "error",
+                "message": "Failed to connect to Raspberry Pi"
+            }), 500
+
+    except Exception as e:
+        error_details = traceback.format_exc()
+        logger.error(f"Error connecting to Raspberry Pi: {str(e)}\n{error_details}")
         return jsonify({
             "status": "error",
-            "message": "No MAC address provided"
-        }), 400
-
-    # Create new client if needed
-    if not bt_client:
-        bt_client = BTCarClient(mac_address)
-
-    # Connect to Pi
-    success = bt_client.connect()
-
-    if success:
-        return jsonify({
-            "status": "success",
-            "message": "Connected to Raspberry Pi"
-        })
-    else:
-        return jsonify({
-            "status": "error",
-            "message": "Failed to connect to Raspberry Pi"
+            "message": f"Error: {str(e)}"
         }), 500
 
 
@@ -294,7 +339,7 @@ def disconnect():
     })
 
 
-@app.route('/command/<cmd>', methods=['POST'])
+@app.route('/command/<cmd>', methods=['POST', 'GET'])
 def execute_command(cmd):
     """
     Execute a command on the Raspberry Pi.
@@ -303,6 +348,17 @@ def execute_command(cmd):
         cmd: Command to execute
     """
     global bt_client
+
+    # Log full request details for debugging
+    logger.debug(f"Received command request: {cmd}")
+    logger.debug(f"Request method: {request.method}")
+    logger.debug(f"Request headers: {dict(request.headers)}")
+    logger.debug(f"Request args: {dict(request.args)}")
+
+    if request.is_json:
+        logger.debug(f"Request JSON: {request.get_json()}")
+    elif request.form:
+        logger.debug(f"Request form: {dict(request.form)}")
 
     # Check connection
     if not bt_client or not bt_client.connected:
@@ -313,10 +369,31 @@ def execute_command(cmd):
 
     # Parse request data
     try:
-        # Get JSON data if provided
+        # Initialize params dictionary
         params = {}
-        if request.is_json and request.json:
-            params = request.json
+
+        # Get JSON data if provided
+        if request.is_json:
+            try:
+                json_data = request.get_json()
+                if json_data and isinstance(json_data, dict):
+                    params.update(json_data)
+            except Exception as e:
+                logger.warning(f"Error parsing JSON data: {str(e)}")
+
+        # Add form data if present
+        if request.form:
+            for key, value in request.form.items():
+                try:
+                    # Try to convert values to appropriate types
+                    if value.isdigit():
+                        params[key] = int(value)
+                    elif value.replace('.', '', 1).isdigit():
+                        params[key] = float(value)
+                    else:
+                        params[key] = value
+                except:
+                    params[key] = value
 
         # Add query parameters (for angle, etc.)
         for key, value in request.args.items():
@@ -331,7 +408,7 @@ def execute_command(cmd):
             except:
                 params[key] = value
 
-        logger.info(f"Command: {cmd}, Params: {params}")
+        logger.info(f"Processed command: {cmd}, Params: {params}")
 
         # Send command to Pi
         bt_client.send_command(cmd, params)
@@ -354,7 +431,8 @@ def execute_command(cmd):
         })
 
     except Exception as e:
-        logger.error(f"Error executing command: {str(e)}")
+        error_details = traceback.format_exc()
+        logger.error(f"Error executing command: {str(e)}\n{error_details}")
         return jsonify({
             "status": "error",
             "message": f"Error: {str(e)}"
@@ -429,6 +507,7 @@ def main():
     parser.add_argument('--host', default='0.0.0.0', help='Host to run the web server on')
     parser.add_argument('--port', type=int, default=8080, help='Port to run the web server on')
     parser.add_argument('--mac', default='D8:3A:DD:6D:E3:54', help='MAC address of the Raspberry Pi Bluetooth adapter')
+    parser.add_argument('--debug', action='store_true', help='Run Flask in debug mode')
 
     args = parser.parse_args()
 
@@ -440,7 +519,7 @@ def main():
 
     try:
         logger.info(f"Starting web server on {args.host}:{args.port}")
-        app.run(host=args.host, port=args.port, threaded=True)
+        app.run(host=args.host, port=args.port, threaded=True, debug=args.debug)
     except KeyboardInterrupt:
         logger.info("Shutting down...")
     finally:
