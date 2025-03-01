@@ -237,7 +237,7 @@ bt_client = None
 @app.route('/')
 def index():
     """Serve the main HTML interface."""
-    return send_from_directory('static', 'index.html')
+    return send_from_directory('../client/static', 'index.html')
 
 
 @app.route('/status')

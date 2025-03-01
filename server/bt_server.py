@@ -1,27 +1,36 @@
 import os
-import time
-import asyncio
-import threading
 import json
-import logging
-from typing import Dict, Optional
 import base64
+import threading
+import asyncio
+import numpy as np
+import time
+from bluedot.btcomm import BluetoothServer
+from commands import Commands  # Assuming commands.py contains the Commands class
 
-# Set environment variables
+
+def numpy_json_encoder(obj):
+    """Custom JSON encoder for NumPy objects"""
+    if isinstance(obj, (np.integer, np.int32, np.int64)):
+        return int(obj)
+    elif isinstance(obj, (np.floating, np.float32, np.float64)):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, np.bool_):
+        return bool(obj)
+    else:
+        try:
+            return obj.tolist()  # Try to convert any other numpy objects
+        except:
+            pass
+    return None  # Let default encoder handle it
+
+
+# Set environment variables (same as in the Flask app)
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'  # Tell Qt to not use GUI
 os.environ['OPENCV_VIDEOIO_PRIORITY_BACKEND'] = 'v4l2'  # Use V4L2 backend for OpenCV
 os.environ['MPLBACKEND'] = 'Agg'  # Force matplotlib to use Agg backend
-
-# Bluedot library
-from bluedot.btcomm import BluetoothServer
-
-# Import your existing commands module
-from commands import Commands
-
-# Configure logging
-logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("PicarX_Bluedot_Server")
 
 
 class AsyncCommandManager:
@@ -30,8 +39,6 @@ class AsyncCommandManager:
         self.commands = None
         self.thread = threading.Thread(target=self._run_event_loop, daemon=True)
         self.thread.start()
-        self._last_visualization = None  # Cache for visualization data
-        self._visualization_lock = threading.Lock()
 
     def _run_event_loop(self):
         """Runs the event loop in a separate thread"""
@@ -44,92 +51,217 @@ class AsyncCommandManager:
 
     async def _initialize_commands(self):
         """Initialize all monitoring tasks"""
-        logger.info("Initializing monitoring tasks...")
         self.commands.state.ultrasonic_task = self.loop.create_task(
             self.commands.object_system.ultrasonic_monitoring())
         self.commands.state.cliff_task = self.loop.create_task(
             self.commands.object_system.cliff_monitoring())
         self.commands.state.pos_track_task = self.loop.create_task(
             self.commands.object_system.px.continuous_position_tracking())
-        logger.info("Monitoring tasks initialized")
 
     def run_coroutine(self, coro):
-        """Run a coroutine in the event loop and return its result"""
+        """Run a coroutine in the event loop"""
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
-        return future.result(10)  # Wait up to 10 seconds for result
+        return future.result(timeout=30)  # Add timeout to prevent hanging
 
-    def get_cached_visualization(self):
-        """Get the cached visualization data"""
-        with self._visualization_lock:
-            return self._last_visualization
+    def cleanup(self):
+        """Cleanup function to stop all tasks and the event loop"""
+        if self.commands:
+            if self.commands.state.vision_task:
+                self.commands.stop_vision()
+            self.commands.cancel_movement()
 
-    def update_cached_visualization(self, viz_data):
-        """Update the cached visualization data"""
-        with self._visualization_lock:
-            self._last_visualization = viz_data
+        # Stop the event loop
+        self.loop.call_soon_threadsafe(self.loop.stop)
+        self.thread.join(timeout=5)  # Add timeout to prevent hanging
 
 
-class BluedotServer:
-    def __init__(self, device_name="PicarXServer"):
-        """Initialize the Bluedot server
-
-        Args:
-            device_name: Device name for Bluetooth advertisements
-        """
+class BluetoothServer:
+    def __init__(self):
+        print("Initializing Bluetooth server for PicarX...")
         self.manager = AsyncCommandManager()
-        self.device_name = device_name
-        self.server = None
-        self.running = False
+        self.server = BluetoothServer(self.data_received, when_client_connects=self.client_connected,
+                                      when_client_disconnects=self.client_disconnected,
+                                      port=2,
+                                      auto_start=False)
+        self.video_active = False
+        self.video_thread = None
 
-        # Set up connection state
-        self.connected_clients = set()
+        # Wait for manager to initialize
+        print("Waiting for AsyncCommandManager to initialize...")
+        time.sleep(3)  # Give time for the event loop to start and commands to initialize
 
-    def handle_data(self, data, client_addr):
-        """Handle data received from a client
+        # Start the server
+        self.server.start()
+        print(f"Bluetooth server started. Device name: {self.server.server_address}")
+        print(f"The server is discoverable as '{self.server.server_address}'")
 
-        Args:
-            data: The data received as string
-            client_addr: The client address tuple (address, port)
+    def client_connected(self, client_address=None):
+        """Called when a client connects"""
+        if client_address:
+            print(f"Client connected: {client_address}")
+        else:
+            print("Client connected (address unknown)")
 
-        Returns:
-            Response string or None
-        """
+    def client_disconnected(self, client_address=None):
+        """Called when a client disconnects"""
+        if client_address:
+            print(f"Client disconnected: {client_address}")
+        else:
+            print("Client disconnected (address unknown)")
+
+        # Stop any active movement when client disconnects
+        if self.manager.commands:
+            self.manager.commands.cancel_movement()
+
+        # Stop video streaming if active
+        if self.video_active:
+            self.video_active = False
+            if self.video_thread and self.video_thread.is_alive():
+                self.video_thread.join(timeout=5)
+
+    def data_received(self, data):
+        """Handle incoming Bluetooth commands"""
         try:
-            # Parse the command
-            command_data = json.loads(data)
-            cmd = command_data.get('cmd')
-            params = command_data.get('params', {})
+            # Parse the JSON data
+            request = json.loads(data)
+            endpoint = request.get('endpoint', '')
+            cmd = request.get('cmd', '')
+            params = request.get('params', {})
 
-            logger.debug(f"Received command: {cmd}, params: {params} from {client_addr}")
+            print(f"Received command: {endpoint}/{cmd} with params: {params}")
 
-            if not self.manager.commands:
-                return json.dumps({
+            # Handle different command types
+            response = None
+            if endpoint == 'command':
+                response = self.handle_command(cmd, params)
+            elif endpoint == 'status':
+                response = self.handle_status()
+            elif endpoint == 'world-state':
+                response = self.handle_world_state()
+            elif endpoint == 'visualization':
+                response = self.handle_visualization()
+            elif endpoint == 'video-feed':
+                response = self.handle_video_feed(params)
+            else:
+                response = json.dumps({
                     "status": "error",
-                    "message": "Server still initializing"
+                    "message": f"Unknown endpoint: {endpoint}"
                 })
 
-            # Process commands
-            if cmd == "forward":
-                success = self.manager.commands.forward()
-                if not success:
+            return response
+        except json.JSONDecodeError:
+            return json.dumps({
+                "status": "error",
+                "message": "Invalid JSON data"
+            })
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return json.dumps({
+                "status": "error",
+                "message": str(e)
+            })
+
+    def handle_command(self, cmd, params):
+        """Handle robot command endpoints"""
+        if not self.manager.commands:
+            return json.dumps({
+                "status": "error",
+                "message": "Server still initializing"
+            })
+
+        try:
+            if cmd == 'scan':
+                # Show scanning message
+                print("Starting environment scan...")
+
+                # Handle scan command differently as it's a coroutine
+                # We need to run this in the event loop
+                future = asyncio.run_coroutine_threadsafe(
+                    self.manager.commands.scan_env(),
+                    self.manager.loop
+                )
+                try:
+                    # Wait for the scan to complete
+                    result = future.result(timeout=30)
+                    print("Scan completed, response size:", len(str(result)))
+
+                    # Log the structure of the result
+                    if isinstance(result, dict):
+                        print(f"Result structure: {list(result.keys())}")
+                        if 'data' in result:
+                            print(f"Data structure: {list(result['data'].keys())}")
+
+                    # Ensure we have grid data
+                    if 'data' not in result or 'grid_data' not in result['data']:
+                        print("Warning: Missing grid_data in scan result")
+
+                    # Ensure we have visualization image
+                    if 'data' not in result or 'plot_image' not in result['data']:
+                        print("Warning: Missing plot_image in scan result")
+
+                    # Return the result with NumPy handling
+                    return json.dumps(result, default=numpy_json_encoder)
+                except asyncio.TimeoutError:
+                    print("Scan operation timed out")
+                    return json.dumps({
+                        "status": "error",
+                        "message": "Scan operation timed out"
+                    })
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    print(f"Scan error: {e}")
+                    return json.dumps({
+                        "status": "error",
+                        "message": f"Scan error: {str(e)}"
+                    })
+
+            elif cmd == "forward":
+                # Check hazard flag without trying to create a task
+                if self.manager.commands.state.emergency_stop_flag:
                     return json.dumps({
                         "status": "error",
                         "message": "Cannot move forward due to hazard"
                     })
+
+                # Do the forward movement synchronously
+                try:
+                    # Direct call to the motor functions instead of creating a task
+                    self.manager.commands.px.set_dir_servo_angle(0)  # Straighten wheels
+                    self.manager.commands.px.forward(self.manager.commands.state.speed)
+                    self.manager.commands.state.is_moving = True
+                except Exception as e:
+                    print(f"Forward movement error: {e}")
+
                 return json.dumps({
                     "status": "success",
                     "message": "Moving forward"
                 })
 
             elif cmd == "backward":
-                self.manager.commands.backward()
+                # Reset emergency stop flag
+                self.manager.commands.state.emergency_stop_flag = False
+
+                # Do the backward movement synchronously
+                try:
+                    # Direct call to the motor functions
+                    self.manager.commands.px.set_dir_servo_angle(0)  # Straighten wheels
+                    self.manager.commands.px.backward(self.manager.commands.state.speed)
+                    self.manager.commands.state.is_moving = True
+                except Exception as e:
+                    print(f"Backward movement error: {e}")
+
                 return json.dumps({
                     "status": "success",
                     "message": "Moving backward"
                 })
 
             elif cmd in ["left", "right"]:
-                angle = params.get('angle', 30 if cmd == "right" else -30)
+                # Get angle from params, default to ±30
+                angle = int(params.get('angle', 30 if cmd == "right" else -30))
+
+                # This is a synchronous call, no need for event loop
                 success = self.manager.commands.turn(angle)
                 if not success:
                     return json.dumps({
@@ -142,171 +274,246 @@ class BluedotServer:
                 })
 
             elif cmd == "stop":
-                self.manager.commands.cancel_movement()
+                # This is a synchronous call, no need for event loop
+                try:
+                    self.manager.commands.cancel_movement()
+                    self.manager.commands.px.stop()
+                    self.manager.commands.state.is_moving = False
+
+                    # Additionally, make sure any active task is cancelled in the event loop
+                    if self.manager.commands.state.movement_task:
+                        self.manager.loop.call_soon_threadsafe(
+                            self.manager.commands.state.movement_task.cancel
+                        )
+                        self.manager.commands.state.movement_task = None
+                except Exception as e:
+                    print(f"Stop movement error: {e}")
+
                 return json.dumps({
                     "status": "success",
                     "message": "Stopped movement"
                 })
 
-            elif cmd == "scan":
-                # Run the scan operation and get results
-                try:
-                    scan_result = self.manager.run_coroutine(self.manager.commands.scan_env())
+            elif cmd == "see":
+                # Create vision task in the event loop
+                self.manager.loop.call_soon_threadsafe(
+                    lambda: setattr(
+                        self.manager.commands.state,
+                        'vision_task',
+                        self.manager.loop.create_task(self.manager.commands.vision.capture_and_detect())
+                    )
+                )
 
-                    # Cache visualization for later requests
-                    if scan_result.get('status') == 'success':
-                        self.manager.update_cached_visualization(scan_result.get('data', {}))
+                # Give a short delay to allow the task to start
+                time.sleep(0.1)
 
-                    # Since Bluetooth has limited bandwidth, we'll just inform that scan is complete
-                    # The client can request visualization separately if needed
-                    return json.dumps({
-                        "status": "success",
-                        "message": "Scan complete",
-                        "world_state": scan_result.get('data', {}).get('world_state', {})
-                    })
-                except asyncio.TimeoutError:
-                    return json.dumps({
-                        "status": "error",
-                        "message": "Scan operation timed out"
-                    })
+                objects = self.manager.commands.get_objects()
 
-            elif cmd == "get_visualization":
-                # Get the cached visualization
-                viz_data = self.manager.get_cached_visualization()
-                if not viz_data:
-                    return json.dumps({
-                        "status": "error",
-                        "message": "No visualization data available. Run a scan first."
-                    })
+                # Start video streaming in a separate thread
+                self.video_active = True
+                self.video_thread = threading.Thread(target=self.stream_video)
+                self.video_thread.daemon = True
+                self.video_thread.start()
 
-                # Return the visualization data
                 return json.dumps({
                     "status": "success",
-                    "data": {
-                        "grid_data": viz_data.get('grid_data', {}),
-                        # Don't include the plot image in the initial response as it could be large
-                        "has_image": "plot_image" in viz_data
-                    }
+                    "message": "Vision system started",
+                    "objects": objects,
                 })
 
-            elif cmd == "get_visualization_image":
-                # Get the cached visualization
-                viz_data = self.manager.get_cached_visualization()
-                if not viz_data or "plot_image" not in viz_data:
-                    return json.dumps({
-                        "status": "error",
-                        "message": "No visualization image available. Run a scan first."
-                    })
+            elif cmd == "blind":
+                # Stop vision task using the event loop
+                self.manager.loop.call_soon_threadsafe(
+                    lambda: self.manager.commands.state.vision_task.cancel()
+                    if self.manager.commands.state.vision_task else None
+                )
 
-                # Return just the image part
+                # This is a synchronous call
+                self.manager.commands.stop_vision()
+                self.video_active = False
+
                 return json.dumps({
                     "status": "success",
-                    "data": {
-                        "plot_image": viz_data.get("plot_image", "")
-                    }
-                })
-
-            elif cmd == "status":
-                return json.dumps({
-                    "status": "success",
-                    "data": {
-                        "object_distance": self.manager.commands.get_object_distance(),
-                        "emergency_stop": self.manager.commands.state.emergency_stop_flag,
-                        "position": self.manager.commands.object_system.px.get_position(),
-                    }
+                    "message": "Vision system stopped"
                 })
 
             else:
                 return json.dumps({
                     "status": "error",
-                    "message": f"Unknown command: {cmd}"
+                    "message": f"Unknown command: {cmd}. Available commands: forward, backward, left, right, stop, scan, see, blind"
                 })
 
         except Exception as e:
-            logger.error(f"Error handling command: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return json.dumps({
                 "status": "error",
-                "message": f"Server error: {str(e)}"
+                "message": str(e)
             })
 
-    def client_connected(self, client_addr):
-        """Handle client connection"""
-        logger.info(f"Client connected: {client_addr}")
-        self.connected_clients.add(client_addr)
+    def handle_status(self):
+        """Handle status endpoint"""
+        if not self.manager.commands:
+            return json.dumps({
+                "status": "error",
+                "message": "Server still initializing"
+            })
 
-    def client_disconnected(self, client_addr):
-        """Handle client disconnection"""
-        logger.info(f"Client disconnected: {client_addr}")
-        if client_addr in self.connected_clients:
-            self.connected_clients.remove(client_addr)
+        return json.dumps({
+            "object_distance": float(self.manager.commands.get_object_distance()),
+            "emergency_stop": bool(self.manager.commands.state.emergency_stop_flag)
+        }, default=numpy_json_encoder)
 
-    def start(self):
-        """Start the Bluetooth server"""
+    def handle_world_state(self):
+        """Handle world-state endpoint"""
+        if not self.manager.commands:
+            return json.dumps({
+                "status": "error",
+                "message": "Server still initializing"
+            })
+
+        return json.dumps({
+            "state": self.manager.commands.world_state()
+        }, default=numpy_json_encoder)
+
+    def handle_visualization(self):
+        """Handle visualization endpoint"""
+        if not self.manager.commands:
+            return json.dumps({
+                "status": "error",
+                "message": "Server still initializing"
+            })
+
         try:
-            logger.info(f"Starting Bluetooth server with device name: {self.device_name}")
+            # Get visualization data directly from the world map
+            visualization_data = self.manager.commands.object_system.world_map.visualize()
 
-            # Create the Bluetooth server
-            self.server = BluetoothServer(
-                self.handle_data,
-                when_client_connects=self.client_connected,
-                when_client_disconnects=self.client_disconnected,
-                device=self.device_name,
-                auto_start=False
-            )
+            if visualization_data.get('visualization') is None:
+                return json.dumps({
+                    "status": "error",
+                    "message": "Failed to generate visualization"
+                })
 
-            # Start the server
-            self.server.start()
-            self.running = True
+            return json.dumps({
+                "status": "success",
+                "data": {
+                    "grid_data": visualization_data['grid_data'],
+                    "plot_image": visualization_data['visualization']
+                }
+            }, default=numpy_json_encoder)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return json.dumps({
+                "status": "error",
+                "message": str(e)
+            })
 
-            logger.info("Bluetooth server started. Waiting for connections...")
+    def stream_video(self):
+        """Stream video frames over Bluetooth"""
+        try:
+            frame_count = 0
+            last_frame_time = time.time()
 
-            # Keep the main thread alive
-            try:
-                while self.running:
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                logger.info("Keyboard interrupt received. Shutting down...")
-                self.stop()
+            while self.video_active and self.manager.commands:
+                current_time = time.time()
+
+                # Get frame if enough time has passed (limit to about 5 fps for Bluetooth)
+                if current_time - last_frame_time >= 0.2:  # 200ms between frames = 5fps
+                    frame = self.manager.commands.vision.get_latest_frame_jpeg()
+                    if frame is not None:
+                        # Compress frame more aggressively for Bluetooth transmission
+                        try:
+                            import cv2
+                            import numpy as np
+                            # Decode JPEG to image
+                            nparr = np.frombuffer(frame, np.uint8)
+                            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+                            # Resize to smaller dimensions for Bluetooth
+                            img_small = cv2.resize(img, (320, 240))
+
+                            # Encode with higher compression
+                            _, compressed_frame = cv2.imencode('.jpg', img_small, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                            frame = compressed_frame.tobytes()
+                        except Exception as e:
+                            print(f"Frame compression error: {e}")
+                            # Continue with original frame if compression fails
+
+                        # Encode frame as base64 and send with a type indicator
+                        frame_data = {
+                            "type": "video_frame",
+                            "frame": base64.b64encode(frame).decode('utf-8')
+                        }
+
+                        try:
+                            self.server.send(json.dumps(frame_data))
+                            frame_count += 1
+
+                            # Print stats occasionally
+                            if frame_count % 20 == 0:
+                                print(f"Sent {frame_count} frames, latest size: {len(frame)} bytes")
+                        except Exception as e:
+                            print(f"Frame send error: {e}")
+
+                        last_frame_time = current_time
+
+                # Short sleep to prevent CPU hogging
+                time.sleep(0.05)
 
         except Exception as e:
-            logger.error(f"Error starting Bluetooth server: {str(e)}")
-            self.stop()
+            print(f"Video streaming error: {e}")
+            self.video_active = False
 
-    def stop(self):
-        """Stop the Bluetooth server"""
-        logger.info("Stopping Bluetooth server...")
-        self.running = False
+    def handle_video_feed(self, params):
+        """Handle one-time request for a video frame"""
+        if not self.manager.commands:
+            return json.dumps({
+                "status": "error",
+                "message": "Server still initializing"
+            })
 
-        if self.server:
-            self.server.stop()
-            self.server = None
+        if not self.manager.commands.state.vision_task:
+            return json.dumps({
+                "status": "error",
+                "message": "Vision system not active"
+            })
 
-        # Clean up command manager
-        if self.manager.commands:
-            if hasattr(self.manager.commands, 'state') and hasattr(self.manager.commands.state,
-                                                                   'vision_task') and self.manager.commands.state.vision_task:
-                self.manager.commands.stop_vision()
-            self.manager.commands.cancel_movement()
+        frame = self.manager.commands.vision.get_latest_frame_jpeg()
+        if frame is not None:
+            return json.dumps({
+                "status": "success",
+                "frame": base64.b64encode(frame).decode('utf-8')
+            })
+        else:
+            return json.dumps({
+                "status": "error",
+                "message": "No frame available"
+            })
 
-        # Stop the event loop
-        self.manager.loop.call_soon_threadsafe(self.manager.loop.stop)
-        self.manager.thread.join(2)  # Wait up to 2 seconds
-
-
-def main():
-    """Main function"""
-    try:
-        # Create and start the server
-        server = BluedotServer()
-        server.start()
-    except KeyboardInterrupt:
-        print("\nShutting down server...")
-    except Exception as e:
-        logger.error(f"Error in main: {str(e)}")
-    finally:
-        if 'server' in locals():
-            server.stop()
+    def cleanup(self):
+        """Cleanup resources"""
+        print("Cleaning up resources...")
+        self.video_active = False
+        if self.video_thread and self.video_thread.is_alive():
+            self.video_thread.join(timeout=5)
+        self.manager.cleanup()
+        self.server.stop()
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        server = BluetoothServer()
+        print("Server running. Press Ctrl+C to exit.")
+
+        # Keep the main thread alive
+        while True:
+            time.sleep(1)
+
+    except KeyboardInterrupt:
+        print("\nShutting down server...")
+    except Exception as e:
+        print(f"Error: {e}")
+    finally:
+        if 'server' in locals():
+            server.cleanup()

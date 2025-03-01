@@ -150,10 +150,15 @@ class PicarXBridge:
 bridge = PicarXBridge()
 
 
-@app.route('/')
-def index():
+@app.route('/bt')
+def bt_index():
     """Serve the main HTML page"""
-    return send_from_directory('static', 'index_2.html')
+    return send_from_directory('static', 'bt_index.html')
+
+@app.route('/wifi')
+def wifi_index():
+    """Serve the main HTML page"""
+    return send_from_directory('static', 'wifi_index.html')
 
 
 @app.route('/connect', methods=['POST'])

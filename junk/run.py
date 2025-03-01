@@ -31,12 +31,12 @@ def ensure_directory_structure():
         os.makedirs(static_dir)
         logger.info(f"Created static directory: {static_dir}")
 
-    # Check if index.html exists in static directory
-    index_path = os.path.join(static_dir, 'index.html')
+    # Check if wifi_index.html exists in static directory
+    index_path = os.path.join(static_dir, 'wifi_index.html')
     bt_client_path = os.path.join(script_dir, 'bt_index.html')
 
     if os.path.exists(bt_client_path) and not os.path.exists(index_path):
-        # Copy bluetooth_client.html to static/index.html
+        # Copy bluetooth_client.html to static/wifi_index.html
         shutil.copy2(bt_client_path, index_path)
         logger.info(f"Copied {bt_client_path} to {index_path}")
 

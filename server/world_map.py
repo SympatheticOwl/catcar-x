@@ -1,155 +1,371 @@
-import time
 import numpy as np
-from typing import Tuple, Dict
-from scipy import ndimage
+import math
+import matplotlib
+# Force matplotlib to use non-interactive backend
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import io
+import base64
+from matplotlib.colors import LinearSegmentedColormap
+from typing import Callable, List, Tuple, Optional, Any, Awaitable
+import asyncio
 
-class WorldMap:
-    def __init__(self, map_size: int = 400, resolution: float = 5.0):
-        self.resolution = resolution  # 5cm per grid cell
-        self.grid_size = int(map_size / resolution)  # 80x80 grid
-        self.grid = np.zeros((self.grid_size, self.grid_size), dtype=np.uint8)
+from state_handler import State
 
-        # Set origin to center of grid
-        self.origin = np.array([self.grid_size // 2, self.grid_size // 2])
 
-        # Obstacle tracking
-        self.obstacles = {}
-        self.obstacle_id_counter = 0
+class WorldMap3:
+    def __init__(self, state: State, grid_size: int = 100, cell_size: float = 1.0):
+        """
+        Initialize the world map
 
-        # Reduce padding size for finer resolution
-        self.padding_size = 1  # Reduced from 2 to 1 since grid cells are smaller
-        self.padding_structure = np.ones((2, 2))
+        Args:
+            state: State object containing robot's status
+            grid_size: Size of the grid (grid_size x grid_size)
+            cell_size: Size of each grid cell in cm
+        """
+        self.state = state
+        self.grid_size = grid_size
+        self.cell_size = cell_size
 
-    def world_to_grid(self, x: float, y: float) -> Tuple[int, int]:
-        """Convert world coordinates (cm) to grid coordinates"""
-        grid_x = int(x / self.resolution) + self.origin[0]
-        grid_y = int(y / self.resolution) + self.origin[1]
+        # Create grid with default unknown state (-1)
+        # 0 = Free space, 1 = Occupied, -1 = Unknown
+        self.grid = np.ones((grid_size, grid_size)) * -1
 
-        # Ensure coordinates are within bounds
+        # Center of the grid is the origin (0,0)
+        self.origin = grid_size // 2
+
+        # Store detected objects with their world coordinates
+        self.objects = []
+
+        # Create custom colormap: unknown=grey, free=white, occupied=black
+        self.cmap = LinearSegmentedColormap.from_list('worldmap_cmap',
+                                                      [(0.5, 0.5, 0.5),  # Unknown (grey)
+                                                       (1, 1, 1),  # Free (white)
+                                                       (0, 0, 0)])  # Occupied (black)
+        self.norm = plt.Normalize(-1, 1)
+
+    def grid_to_world(self, grid_x: int, grid_y: int) -> Tuple[float, float]:
+        """
+        Convert grid coordinates to world coordinates
+
+        Args:
+            grid_x: X coordinate in grid
+            grid_y: Y coordinate in grid
+
+        Returns:
+            (world_x, world_y): Coordinates in world space (cm)
+        """
+        world_x = (grid_x - self.origin) * self.cell_size
+        world_y = (grid_y - self.origin) * self.cell_size
+        return world_x, world_y
+
+    def world_to_grid(self, world_x: float, world_y: float) -> Tuple[int, int]:
+        """
+        Convert world coordinates to grid coordinates
+
+        Args:
+            world_x: X coordinate in world space (cm)
+            world_y: Y coordinate in world space (cm)
+
+        Returns:
+            (grid_x, grid_y): Coordinates in grid
+        """
+        grid_x = int(round(world_x / self.cell_size)) + self.origin
+        grid_y = int(round(world_y / self.cell_size)) + self.origin
+
+        # Ensure coordinates are within grid bounds
         grid_x = max(0, min(grid_x, self.grid_size - 1))
         grid_y = max(0, min(grid_y, self.grid_size - 1))
 
         return grid_x, grid_y
 
-    def grid_to_world(self, grid_x: int, grid_y: int) -> Tuple[float, float]:
-        """Convert grid coordinates to world coordinates (cm)"""
-        x = (grid_x - self.origin[0]) * self.resolution
-        y = (grid_y - self.origin[1]) * self.resolution
-        return x, y
-
-    def add_obstacle(self, x: float, y: float, radius: float = 10.0, confidence: float = 1.0,
-                     label: str = "unknown") -> str:
+    def polar_to_cartesian(self, angle: float, distance: float) -> Tuple[float, float]:
         """
-        Add an obstacle to the map
+        Convert polar coordinates (angle, distance) to cartesian coordinates
+        relative to the robot's current position and heading
 
         Args:
-            x, y: World coordinates of obstacle center (cm)
-            radius: Radius of obstacle (cm)
-            confidence: Detection confidence (0-1)
-            label: Object label from vision system
+            angle: Angle in degrees (relative to robot's heading)
+            distance: Distance in cm
 
         Returns:
-            obstacle_id: Unique ID for tracking this obstacle
+            (x, y): Cartesian coordinates (cm) in world space
         """
-        obstacle_id = f"obs_{self.obstacle_id_counter}"
-        self.obstacle_id_counter += 1
+        # Calculate absolute angle in world coordinates
+        absolute_angle = (self.state.heading + angle) % 360
 
-        # Store obstacle metadata
-        self.obstacles[obstacle_id] = {
-            'x': x,
-            'y': y,
-            'radius': radius,
-            'confidence': confidence,
-            'label': label,
-            'last_seen': time.time()
+        # Convert to radians
+        angle_rad = math.radians(absolute_angle)
+
+        # Calculate offsets
+        x_offset = distance * math.cos(angle_rad)
+        y_offset = distance * math.sin(angle_rad)
+
+        # Add offsets to robot's current position
+        world_x = self.state.x + x_offset
+        world_y = self.state.y + y_offset
+
+        return world_x, world_y
+
+    def update_grid_with_ray(self, start_x: float, start_y: float, end_x: float, end_y: float) -> None:
+        """
+        Update grid using ray casting from start to end point
+
+        Args:
+            start_x, start_y: Start coordinates in world space (cm)
+            end_x, end_y: End coordinates in world space (cm)
+        """
+        # Convert to grid coordinates
+        start_grid_x, start_grid_y = self.world_to_grid(start_x, start_y)
+        end_grid_x, end_grid_y = self.world_to_grid(end_x, end_y)
+
+        # Use Bresenham's line algorithm to get all cells along the ray
+        line_points = self._bresenham_line(start_grid_x, start_grid_y, end_grid_x, end_grid_y)
+
+        # Mark all cells along the ray as free except the last one
+        for i, (grid_x, grid_y) in enumerate(line_points):
+            # Skip if out of bounds
+            if not (0 <= grid_x < self.grid_size and 0 <= grid_y < self.grid_size):
+                continue
+
+            if i == len(line_points) - 1:
+                # Last point is occupied
+                self.grid[grid_y, grid_x] = 1
+            else:
+                # Path to obstacle is free space
+                self.grid[grid_y, grid_x] = 0
+
+    def _bresenham_line(self, x0: int, y0: int, x1: int, y1: int) -> List[Tuple[int, int]]:
+        """
+        Implementation of Bresenham's line algorithm
+
+        Args:
+            x0, y0: Starting point
+            x1, y1: Ending point
+
+        Returns:
+            List of points (x, y) along the line
+        """
+        points = []
+        dx = abs(x1 - x0)
+        dy = abs(y1 - y0)
+        sx = 1 if x0 < x1 else -1
+        sy = 1 if y0 < y1 else -1
+        err = dx - dy
+
+        while True:
+            points.append((x0, y0))
+            if x0 == x1 and y0 == y1:
+                break
+            e2 = 2 * err
+            if e2 > -dy:
+                if x0 == x1:
+                    break
+                err -= dy
+                x0 += sx
+            if e2 < dx:
+                if y0 == y1:
+                    break
+                err += dx
+                y0 += sy
+
+        return points
+
+    async def scan_surroundings(self, sensor_func: Callable[[float], Awaitable[float]],
+                                angle_range: Tuple[int, int] = None,
+                                angle_step: int = None) -> None:
+        """
+        Scan surroundings using the ultrasonic sensor
+
+        Args:
+            sensor_func: Async function that takes an angle and returns a distance
+            angle_range: Range of angles to scan (min, max)
+            angle_step: Step size for scanning in degrees
+        """
+        # Use default values from state if not provided
+        if angle_range is None:
+            angle_range = self.state.scan_range
+        if angle_step is None:
+            angle_step = self.state.scan_step
+
+        # Current robot position in world coordinates
+        robot_x, robot_y = self.state.x, self.state.y
+
+        # Scan surroundings
+        for angle in range(angle_range[0], angle_range[1] + 1, angle_step):
+            # Get distance reading from sensor
+            distance = await sensor_func(angle)
+
+            # Convert to world coordinates
+            if distance < 300:  # Valid reading (not too far)
+                object_x, object_y = self.polar_to_cartesian(angle, distance)
+
+                # Store object
+                self.objects.append((object_x, object_y))
+
+                # Update grid with ray from robot to object
+                self.update_grid_with_ray(robot_x, robot_y, object_x, object_y)
+            else:
+                # If no object detected, mark maximum range as free space
+                max_dist = 50  # Only mark up to 50cm as definitely free
+                far_x, far_y = self.polar_to_cartesian(angle, max_dist)
+
+                # Update grid with ray from robot to maximum range
+                self.update_grid_with_ray(robot_x, robot_y, far_x, far_y)
+
+    def visualize(self, return_image: bool = True) -> dict:
+        """
+        Visualize the world map
+
+        Args:
+            return_image: If True, return base64-encoded PNG image (default: True)
+
+        Returns:
+            Dictionary with visualization data and grid data
+        """
+        # Use non-interactive Agg backend to avoid plt.show() issues in headless environments
+        plt.switch_backend('Agg')
+
+        fig, ax = plt.subplots(figsize=(8, 8))
+
+        # Plot the grid
+        im = ax.imshow(self.grid, cmap=self.cmap, norm=self.norm,
+                       extent=[-self.origin * self.cell_size, (self.grid_size - self.origin) * self.cell_size,
+                               -self.origin * self.cell_size, (self.grid_size - self.origin) * self.cell_size])
+
+        # Add colorbar
+        cbar = plt.colorbar(im, ax=ax, ticks=[-1, 0, 1])
+        cbar.ax.set_yticklabels(['Unknown', 'Free', 'Occupied'])
+
+        # Plot robot position (as a triangle pointing in the heading direction)
+        robot_marker_size = 10
+        heading_rad = math.radians(self.state.heading)
+        dx = robot_marker_size * math.cos(heading_rad)
+        dy = robot_marker_size * math.sin(heading_rad)
+
+        ax.arrow(self.state.x, self.state.y, dx, dy,
+                 head_width=5, head_length=5, fc='r', ec='r')
+
+        # Plot robot position
+        ax.plot(self.state.x, self.state.y, 'ro', markersize=5)
+
+        # Add grid
+        ax.grid(True, linestyle='--', alpha=0.7)
+
+        # Set title and labels
+        ax.set_title(f'World Map (Robot at {self.state.x:.1f}, {self.state.y:.1f}, heading {self.state.heading:.1f}°)')
+        ax.set_xlabel('X (cm)')
+        ax.set_ylabel('Y (cm)')
+
+        # Set axis equal and limits
+        ax.set_aspect('equal')
+
+        # Prepare grid data for ASCII representation
+        grid_data = {
+            'grid': self.grid.tolist(),
+            'position': {
+                'x': float(self.state.x),
+                'y': float(self.state.y),
+                'heading': float(self.state.heading)
+            },
+            'dimensions': {
+                'width': self.grid_size,
+                'height': self.grid_size,
+                'cell_size': self.cell_size,
+                'origin': self.origin
+            }
         }
 
-        # Update grid
-        self._update_grid_for_obstacle(x, y, radius)
+        # Always save to buffer
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', dpi=100)
+        buf.seek(0)
 
-        return obstacle_id
+        result = {'grid_data': grid_data}
 
-    def _update_grid_for_obstacle(self, x: float, y: float, radius: float):
-        """Update grid cells for an obstacle"""
-        grid_x, grid_y = self.world_to_grid(x, y)
-        grid_radius = int(radius / self.resolution)
+        if return_image:
+            # Convert to base64
+            img_str = base64.b64encode(buf.read()).decode('utf-8')
+            plt.close(fig)
+            result['visualization'] = img_str
+        else:
+            # No need for plt.show(), just return None for visualization
+            plt.close(fig)
+            result['visualization'] = None
 
-        # Calculate grid boundaries
-        x_min = max(0, grid_x - grid_radius)
-        x_max = min(self.grid_size, grid_x + grid_radius + 1)
-        y_min = max(0, grid_y - grid_radius)
-        y_max = min(self.grid_size, grid_y + grid_radius + 1)
+        return result
 
-        # Create a circle mask of the correct size
-        y_size = y_max - y_min
-        x_size = x_max - x_min
-        if y_size <= 0 or x_size <= 0:
-            return  # Skip if dimensions are invalid
+    def get_ascii_map(self, width: int = 40, height: int = 20) -> str:
+        """
+        Generate ASCII representation of the map
 
-        y_indices, x_indices = np.ogrid[:y_size, :x_size]
+        Args:
+            width: Width of ASCII map
+            height: Height of ASCII map
 
-        # Adjust indices to be centered on the obstacle
-        center_y = grid_y - y_min
-        center_x = grid_x - x_min
-        circle_mask = (x_indices - (x_size // 2)) ** 2 + (y_indices - (y_size // 2)) ** 2 <= grid_radius ** 2
+        Returns:
+            ASCII map as string
+        """
+        # Create empty ASCII map
+        ascii_map = [['·' for _ in range(width)] for _ in range(height)]
 
-        # Update grid using the correctly sized mask
-        self.grid[y_min:y_max, x_min:x_max] = np.logical_or(
-            self.grid[y_min:y_max, x_min:x_max],
-            circle_mask
-        ).astype(np.uint8)
+        # Calculate scaling factors
+        scale_x = self.grid_size / width
+        scale_y = self.grid_size / height
 
-    def update_obstacle_position(self, obstacle_id: str, new_x: float, new_y: float):
-        """Update position of a tracked obstacle"""
-        if obstacle_id in self.obstacles:
-            # Clear old position
-            old_x = self.obstacles[obstacle_id]['x']
-            old_y = self.obstacles[obstacle_id]['y']
-            radius = self.obstacles[obstacle_id]['radius']
-            self._clear_grid_area(old_x, old_y, radius)
+        # Fill ASCII map based on grid data
+        for y in range(height):
+            for x in range(width):
+                # Convert ASCII coordinates to grid coordinates
+                grid_x = int(x * scale_x)
+                grid_y = int(y * scale_y)
 
-            # Update position
-            self.obstacles[obstacle_id]['x'] = new_x
-            self.obstacles[obstacle_id]['y'] = new_y
-            self.obstacles[obstacle_id]['last_seen'] = time.time()
+                # Get cell value
+                if 0 <= grid_x < self.grid_size and 0 <= grid_y < self.grid_size:
+                    cell = self.grid[grid_y, grid_x]
 
-            # Add to new position
-            self._update_grid_for_obstacle(new_x, new_y, radius)
+                    if cell == 1:  # Occupied
+                        ascii_map[y][x] = '#'
+                    elif cell == 0:  # Free
+                        ascii_map[y][x] = ' '
+                    # else unknown ('·')
 
-    def _clear_grid_area(self, x: float, y: float, radius: float):
-        """Clear grid cells in an area"""
-        grid_x, grid_y = self.world_to_grid(x, y)
-        grid_radius = int(radius / self.resolution)
+        # Add robot position
+        robot_grid_x, robot_grid_y = self.world_to_grid(self.state.x, self.state.y)
+        robot_ascii_x = int(robot_grid_x / scale_x)
+        robot_ascii_y = int(robot_grid_y / scale_y)
 
-        x_min = max(0, grid_x - grid_radius)
-        x_max = min(self.grid_size, grid_x + grid_radius + 1)
-        y_min = max(0, grid_y - grid_radius)
-        y_max = min(self.grid_size, grid_y + grid_radius + 1)
+        # Only add robot if within ASCII map bounds
+        if 0 <= robot_ascii_x < width and 0 <= robot_ascii_y < height:
+            # Direction markers based on heading
+            heading_markers = {
+                0: '^',  # North
+                45: '/',  # Northeast
+                90: '>',  # East
+                135: '\\',  # Southeast
+                180: 'v',  # South
+                225: '/',  # Southwest
+                270: '<',  # West
+                315: '\\'  # Northwest
+            }
 
-        if y_max > y_min and x_max > x_min:  # Ensure valid dimensions
-            self.grid[y_min:y_max, x_min:x_max] = 0
+            # Get closest direction
+            closest_heading = min(heading_markers.keys(),
+                                  key=lambda h: abs((self.state.heading - h + 180) % 360 - 180))
 
-    def add_padding(self):
-        """Add padding around obstacles"""
-        # Apply padding using binary dilation
-        self.grid = ndimage.binary_dilation(
-            self.grid,
-            structure=self.padding_structure,
-            iterations=self.padding_size
-        ).astype(np.uint8)
+            ascii_map[robot_ascii_y][robot_ascii_x] = heading_markers[closest_heading]
 
-        print("\nCurrent Map (with padding):")
-        self.visualize_map()
+        # Convert to string
+        ascii_str = '\n'.join([''.join(row) for row in ascii_map])
 
-    def world_map(self):
-        map = []
-        for row in self.grid:
-            map.append(''.join(['1' if cell else '0' for cell in row]))
+        # Add legend
+        legend = (
+            f"\nLegend:\n"
+            f"  · = Unknown\n"
+            f"    = Free space\n"
+            f"  # = Obstacle\n"
+            f"  ^>v< = Robot position and direction\n"
+            f"\nRobot: ({self.state.x:.1f}, {self.state.y:.1f}), Heading: {self.state.heading:.1f}°"
+        )
 
-        print('\n'.join(map))
-        return map
-
-    def visualize_map(self):
-        """Print ASCII visualization of the map"""
-        for row in self.grid:
-            print(''.join(['1' if cell else '0' for cell in row]))
+        return ascii_str + legend
