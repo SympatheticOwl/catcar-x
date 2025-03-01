@@ -42,9 +42,10 @@ class CarBluetoothServer:
     def __init__(self):
         """Initialize the Bluetooth server and car control system."""
         # Initialize the event loop in a separate thread
-        self.loop = asyncio.new_event_loop()
+        # self.loop = asyncio.new_event_loop()
         # self.thread = threading.Thread(target=self._run_event_loop, daemon=True)
         # self.thread.start()
+
         self.commands = Commands()
 
         # Initialize the server
@@ -185,16 +186,16 @@ class CarBluetoothServer:
 
             # Handle command
             if command == 'forward':
-                self._run_coroutine(self._handle_forward())
+                self.commands.forward()
             elif command == 'backward':
-                self._run_coroutine(self._handle_backward())
+                self.commands.backward()
             elif command == 'left' or command == 'right':
                 angle = params.get('angle', 30 if command == 'right' else -30)
                 self._run_coroutine(self._handle_turn(angle))
             elif command == 'stop':
                 self._run_coroutine(self._handle_stop())
             elif command == 'scan':
-                self._run_coroutine(self._handle_scan())
+                self.commands.scan_env()
             elif command == 'see':
                 self._handle_see()
             elif command == 'blind':
