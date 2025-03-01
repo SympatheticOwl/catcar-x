@@ -193,8 +193,39 @@ def execute_command(cmd):
         if angle:
             params['angle'] = angle
 
+    # Special handling for scan command
+    if cmd == 'scan':
+        print("Executing scan command...")
+
     # Send the command to the Pi
     response = bridge.send_command('command', cmd, params)
+
+    # Debug logging for scan command
+    if cmd == 'scan':
+        print(f"Scan response received, status: {response.get('status')}")
+        if response.get('status') == 'success' and 'data' in response:
+            data_keys = list(response['data'].keys()) if isinstance(response['data'], dict) else 'Not a dict'
+            print(f"Scan data contains keys: {data_keys}")
+
+            # Check if visualization data exists
+            if isinstance(response['data'], dict):
+                if 'plot_image' in response['data']:
+                    img_length = len(response['data']['plot_image']) if response['data']['plot_image'] else 0
+                    print(f"plot_image length: {img_length}")
+                else:
+                    print("plot_image is missing")
+
+                if 'grid_data' in response['data']:
+                    if isinstance(response['data']['grid_data'], dict) and 'grid' in response['data']['grid_data']:
+                        grid_size = len(response['data']['grid_data']['grid']) if response['data']['grid_data'][
+                            'grid'] else 0
+                        print(
+                            f"grid size: {grid_size}x{len(response['data']['grid_data']['grid'][0]) if grid_size > 0 else 0}")
+                    else:
+                        print("grid is missing or malformed in grid_data")
+                else:
+                    print("grid_data is missing")
+
     return jsonify(response)
 
 

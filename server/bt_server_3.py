@@ -172,6 +172,9 @@ class PicarXBluetoothServer:
 
         try:
             if cmd == 'scan':
+                # Show scanning message
+                print("Starting environment scan...")
+
                 # Handle scan command differently as it's a coroutine
                 # We need to run this in the event loop
                 future = asyncio.run_coroutine_threadsafe(
@@ -179,12 +182,39 @@ class PicarXBluetoothServer:
                     self.manager.loop
                 )
                 try:
+                    # Wait for the scan to complete
                     result = future.result(timeout=30)
+                    print("Scan completed, response size:", len(str(result)))
+
+                    # Log the structure of the result
+                    if isinstance(result, dict):
+                        print(f"Result structure: {list(result.keys())}")
+                        if 'data' in result:
+                            print(f"Data structure: {list(result['data'].keys())}")
+
+                    # Ensure we have grid data
+                    if 'data' not in result or 'grid_data' not in result['data']:
+                        print("Warning: Missing grid_data in scan result")
+
+                    # Ensure we have visualization image
+                    if 'data' not in result or 'plot_image' not in result['data']:
+                        print("Warning: Missing plot_image in scan result")
+
+                    # Return the result with NumPy handling
                     return json.dumps(result, default=numpy_json_encoder)
                 except asyncio.TimeoutError:
+                    print("Scan operation timed out")
                     return json.dumps({
                         "status": "error",
                         "message": "Scan operation timed out"
+                    })
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    print(f"Scan error: {e}")
+                    return json.dumps({
+                        "status": "error",
+                        "message": f"Scan error: {str(e)}"
                     })
 
             elif cmd == "forward":
