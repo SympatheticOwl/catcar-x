@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """
-Bluetooth Bridge Server
------------------------
-This script creates a bridge between the web client and the Raspberry Pi car.
-It connects to the car via Bluetooth using the BlueDot library and
-serves the web client interface on a local HTTP server.
+Fixed Bluetooth Bridge Server
+----------------------------
+This improved version fixes issues with command forwarding to the Bluetooth server.
 """
 
 import os
@@ -65,11 +63,15 @@ class BTCarClient:
         """Connect to the Raspberry Pi via Bluetooth."""
         try:
             logger.info(f"Connecting to Raspberry Pi at {self.server_mac}...")
+
+            # Initialize the client with a callback
             self.client = BluetoothClient(
                 self.server_mac,
                 data_received_callback=self._data_received,
                 port=2
             )
+
+            # The client is now connected
             self.connected = True
             global bt_connected
             bt_connected = True
@@ -84,6 +86,9 @@ class BTCarClient:
             self.send_thread.daemon = True
             self.send_thread.start()
 
+            # Send a test message to verify connection
+            self.send_command("ping")
+
             return True
         except Exception as e:
             logger.error(f"Failed to connect to Raspberry Pi: {str(e)}")
@@ -94,10 +99,16 @@ class BTCarClient:
     def disconnect(self):
         """Disconnect from the Raspberry Pi."""
         if self.client:
+            logger.info("Disconnecting from Raspberry Pi...")
             self.connected = False
             global bt_connected
             bt_connected = False
-            self.client.disconnect()
+
+            try:
+                self.client.disconnect()
+            except Exception as e:
+                logger.error(f"Error during disconnect: {str(e)}")
+
             logger.info("Disconnected from Raspberry Pi")
 
     def _data_received(self, data):
@@ -108,15 +119,22 @@ class BTCarClient:
             data: Data received from the Raspberry Pi
         """
         try:
+            # Log raw data for debugging
+            logger.debug(f"Raw data received: {data}")
+
             # Check if it's a video frame (starts with "FRAME:")
             if data.startswith("FRAME:"):
                 global latest_frame
                 latest_frame = data[6:]  # Remove the "FRAME:" prefix
+                logger.debug("Received video frame")
             else:
-                # It's a JSON response
-                response = json.loads(data)
-                resp_queue.put(response)
-                logger.debug(f"Received response: {response}")
+                # Try to parse as JSON response
+                try:
+                    response = json.loads(data)
+                    resp_queue.put(response)
+                    logger.info(f"Received response: {response}")
+                except json.JSONDecodeError:
+                    logger.warning(f"Received non-JSON data: {data}")
         except Exception as e:
             logger.error(f"Error processing received data: {str(e)}")
 
@@ -126,11 +144,15 @@ class BTCarClient:
             try:
                 # Get command from queue with timeout
                 cmd = cmd_queue.get(timeout=1)
-                logger.debug(f"running command: {cmd}")
+                logger.info(f"running command: {cmd}")
+
+                # Serialize the command to JSON if it's not already a string
+                if not isinstance(cmd, str):
+                    cmd = json.dumps(cmd)
 
                 # Send command to Pi
-                self.client.send(json.dumps(cmd))
-                logger.debug(f"Sent command: {cmd}")
+                logger.info(f"Sending command: {cmd}")
+                self.client.send(cmd)
 
                 # Mark task as done
                 cmd_queue.task_done()
@@ -142,8 +164,8 @@ class BTCarClient:
 
     def _receive_loop(self):
         """Background thread to process incoming data."""
-        # Note: This is not actually used since data is processed in the callback,
-        # but keeping it in case we need additional processing
+        # This is mostly handled by the callback, but we keep the thread
+        # running to maintain the connection
         while self.connected:
             time.sleep(0.1)
 
@@ -167,7 +189,7 @@ class BTCarClient:
             "params": params or {}
         }
 
-        print(f'adding command {cmd}')
+        logger.info(f"Queueing command: {cmd}")
         cmd_queue.put(cmd)
         return True
 
@@ -225,7 +247,8 @@ def connect():
         })
 
     # Get MAC address from request or use default
-    mac_address = request.json.get('mac') if request.json else None
+    data = request.json or {}
+    mac_address = data.get('mac')
 
     if not mac_address and not bt_client:
         return jsonify({
@@ -279,38 +302,63 @@ def execute_command(cmd):
     Args:
         cmd: Command to execute
     """
+    global bt_client
+
+    # Check connection
     if not bt_client or not bt_client.connected:
         return jsonify({
             "status": "error",
             "message": "Not connected to Raspberry Pi"
         }), 503
 
-    # Get parameters from request
-    params = request.json if request.json else {}
+    # Parse request data
+    try:
+        # Get JSON data if provided
+        params = {}
+        if request.is_json and request.json:
+            params = request.json
 
-    # Add angle parameter for turn commands
-    if cmd in ['left', 'right'] and request.args.get('angle'):
-        params['angle'] = int(request.args.get('angle'))
+        # Add query parameters (for angle, etc.)
+        for key, value in request.args.items():
+            try:
+                # Try to convert values to appropriate types
+                if value.isdigit():
+                    params[key] = int(value)
+                elif value.replace('.', '', 1).isdigit():
+                    params[key] = float(value)
+                else:
+                    params[key] = value
+            except:
+                params[key] = value
 
-    # Send command to Pi
-    bt_client.send_command(cmd, params)
+        logger.info(f"Command: {cmd}, Params: {params}")
 
-    # For 'scan' command, wait for response
-    if cmd == 'scan':
-        response = bt_client.get_response(timeout=10.0)
-        if response:
-            return jsonify(response)
-        else:
-            return jsonify({
-                "status": "error",
-                "message": "Scan timed out"
-            }), 504
+        # Send command to Pi
+        bt_client.send_command(cmd, params)
 
-    # For most commands, return immediate success
-    return jsonify({
-        "status": "success",
-        "message": f"Command '{cmd}' sent to Raspberry Pi"
-    })
+        # For 'scan' command, wait for response
+        if cmd == 'scan':
+            response = bt_client.get_response(timeout=15.0)
+            if response:
+                return jsonify(response)
+            else:
+                return jsonify({
+                    "status": "error",
+                    "message": "Scan timed out"
+                }), 504
+
+        # For most commands, return immediate success
+        return jsonify({
+            "status": "success",
+            "message": f"Command '{cmd}' sent to Raspberry Pi"
+        })
+
+    except Exception as e:
+        logger.error(f"Error executing command: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": f"Error: {str(e)}"
+        }), 500
 
 
 def generate_frames():
@@ -350,6 +398,8 @@ def video_feed():
 @app.route('/visualization')
 def get_visualization():
     """Get the visualization data from the Pi."""
+    global bt_client
+
     if not bt_client or not bt_client.connected:
         return jsonify({
             "status": "error",
@@ -394,7 +444,7 @@ def main():
     except KeyboardInterrupt:
         logger.info("Shutting down...")
     finally:
-        if bt_client:
+        if bt_client and bt_client.connected:
             bt_client.disconnect()
 
 
