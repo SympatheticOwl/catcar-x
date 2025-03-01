@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Fixed Raspberry Pi Bluetooth Server
-----------------------------------
-This version fixes the callback issues with the Bluetooth server.
+Minimal Raspberry Pi Bluetooth Server
+------------------------------------
+A minimal implementation that avoids using problematic callbacks.
 """
 
 import os
@@ -24,9 +24,33 @@ logging.basicConfig(
 )
 logger = logging.getLogger("BT-Server")
 
+# Global variable to track client connections
+bt_client = None
+
+
+def data_received(data):
+    """
+    Global callback function for received data.
+
+    Args:
+        data: Data received from the client
+    """
+    global bt_client
+
+    # If this is the first message, set the client
+    if bt_client is None and hasattr(data, 'client'):
+        bt_client = data.client
+        logger.info(f"Client connected")
+
+    try:
+        # Process the data
+        car_server.process_command(data)
+    except Exception as e:
+        logger.error(f"Error processing data: {str(e)}")
+
 
 class CarBluetoothServer:
-    """Bluetooth server for the PicarX car with fixed callback handling."""
+    """Minimalist Bluetooth server for the PicarX car."""
 
     def __init__(self):
         """Initialize the server and car control system."""
@@ -35,7 +59,6 @@ class CarBluetoothServer:
 
         # Initialize Bluetooth server
         self.server = None
-        self.client = None
         self.video_enabled = False
         self.video_thread = None
 
@@ -60,27 +83,8 @@ class CarBluetoothServer:
         try:
             logger.info("Starting Bluetooth server...")
 
-            # Define wrapper functions that are not methods of the class
-            # to avoid 'self' parameter issues
-            def client_connected_wrapper(client):
-                logger.info(f"Client connected: {client.client_address}")
-                self.client = client
-
-            def client_disconnected_wrapper(client):
-                logger.info(f"Client disconnected: {client.client_address}")
-                self.video_enabled = False
-                self.client = None
-
-            def data_received_wrapper(data):
-                self._process_received_data(data)
-
-            # Create Bluetooth server with wrapper functions as callbacks
-            self.server = BluetoothServer(
-                data_received_wrapper,
-                when_client_connects=client_connected_wrapper,
-                when_client_disconnects=client_disconnected_wrapper,
-                port=2
-            )
+            # Create Bluetooth server with only the data received callback
+            self.server = BluetoothServer(data_received, port=2)
 
             logger.info(f"Bluetooth server started")
             return True
@@ -109,8 +113,13 @@ class CarBluetoothServer:
         logger.info("Bluetooth server stopped")
         return True
 
-    def _process_received_data(self, data):
-        """Process data received from the client."""
+    def process_command(self, data):
+        """
+        Process command received from the client.
+
+        Args:
+            data: The received data
+        """
         try:
             # Parse JSON data
             cmd_data = json.loads(data)
@@ -281,8 +290,9 @@ class CarBluetoothServer:
     def _video_stream_loop(self):
         """Background thread for streaming video frames."""
         logger.info("Video streaming started")
+        global bt_client
 
-        while self.video_enabled and self.client:
+        while self.video_enabled and bt_client:
             try:
                 # Get latest frame
                 frame = self.commands.vision.get_latest_frame_jpeg()
@@ -292,7 +302,7 @@ class CarBluetoothServer:
                     frame_b64 = base64.b64encode(frame).decode('utf-8')
 
                     # Send frame with "FRAME:" prefix to identify it as a video frame
-                    self.client.send(f"FRAME:{frame_b64}")
+                    bt_client.send(f"FRAME:{frame_b64}")
 
                 # Add a small delay to control frame rate
                 time.sleep(0.1)  # Reduce to ~10 fps for Bluetooth
@@ -330,9 +340,10 @@ class CarBluetoothServer:
 
     def _send_response(self, data):
         """Send a JSON response to the client."""
-        if self.client:
+        global bt_client
+        if bt_client:
             try:
-                self.client.send(json.dumps(data))
+                bt_client.send(json.dumps(data))
             except Exception as e:
                 logger.error(f"Error sending response: {str(e)}")
 
@@ -344,16 +355,20 @@ class CarBluetoothServer:
         })
 
 
+# Create a global instance
+car_server = None
+
+
 def main():
     """Main function."""
-    server = None
+    global car_server
 
     try:
         # Create and start the Bluetooth server
-        server = CarBluetoothServer()
-        if server.start():
+        car_server = CarBluetoothServer()
+        if car_server.start():
             # Run the event loop to keep the program alive
-            server.loop.run_forever()
+            car_server.loop.run_forever()
         else:
             logger.error("Failed to start Bluetooth server")
             return 1
@@ -367,8 +382,8 @@ def main():
 
     finally:
         # Clean up resources
-        if server:
-            server.stop()
+        if car_server:
+            car_server.stop()
 
     return 0
 
