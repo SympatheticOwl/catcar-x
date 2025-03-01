@@ -95,11 +95,20 @@ class PicarXBluetoothServer:
         print(f"Bluetooth server started. Device name: {self.server.server_address}")
         print(f"The server is discoverable as '{self.server.server_address}'")
 
-    def client_connected(self, client_address):
-        print(f"Client connected: {client_address}")
+    def client_connected(self, client_address=None):
+        """Called when a client connects"""
+        if client_address:
+            print(f"Client connected: {client_address}")
+        else:
+            print("Client connected (address unknown)")
 
-    def client_disconnected(self, client_address):
-        print(f"Client disconnected: {client_address}")
+    def client_disconnected(self, client_address=None):
+        """Called when a client disconnects"""
+        if client_address:
+            print(f"Client disconnected: {client_address}")
+        else:
+            print("Client disconnected (address unknown)")
+
         # Stop any active movement when client disconnects
         if self.manager.commands:
             self.manager.commands.cancel_movement()
