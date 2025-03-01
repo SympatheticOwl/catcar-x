@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Simplified Raspberry Pi Bluetooth Server
----------------------------------------
-A more direct implementation that avoids unnecessary threading complexity.
+Fixed Raspberry Pi Bluetooth Server
+----------------------------------
+This version fixes the callback issues with the Bluetooth server.
 """
 
 import os
@@ -26,7 +26,7 @@ logger = logging.getLogger("BT-Server")
 
 
 class CarBluetoothServer:
-    """Simplified Bluetooth server for the PicarX car."""
+    """Bluetooth server for the PicarX car with fixed callback handling."""
 
     def __init__(self):
         """Initialize the server and car control system."""
@@ -60,15 +60,29 @@ class CarBluetoothServer:
         try:
             logger.info("Starting Bluetooth server...")
 
-            # Create Bluetooth server with direct callback references
+            # Define wrapper functions that are not methods of the class
+            # to avoid 'self' parameter issues
+            def client_connected_wrapper(client):
+                logger.info(f"Client connected: {client.client_address}")
+                self.client = client
+
+            def client_disconnected_wrapper(client):
+                logger.info(f"Client disconnected: {client.client_address}")
+                self.video_enabled = False
+                self.client = None
+
+            def data_received_wrapper(data):
+                self._process_received_data(data)
+
+            # Create Bluetooth server with wrapper functions as callbacks
             self.server = BluetoothServer(
-                self._data_received,
-                when_client_connects=self._client_connected,
-                when_client_disconnects=self._client_disconnected,
+                data_received_wrapper,
+                when_client_connects=client_connected_wrapper,
+                when_client_disconnects=client_disconnected_wrapper,
                 port=2
             )
 
-            logger.info(f"Bluetooth server started on {self.server.server_address}")
+            logger.info(f"Bluetooth server started")
             return True
 
         except Exception as e:
@@ -95,31 +109,15 @@ class CarBluetoothServer:
         logger.info("Bluetooth server stopped")
         return True
 
-    def _client_connected(self, client):
-        """Handle client connection."""
-        self.client = client
-        logger.info(f"Client connected: {client.client_address}")
-
-    def _client_disconnected(self, client):
-        """Handle client disconnection."""
-        logger.info(f"Client disconnected: {client.client_address}")
-
-        # Stop video streaming if active
-        self.video_enabled = False
-
-        # Reset client reference
-        self.client = None
-
-    def _data_received(self, data):
-        """Handle data received from the client."""
-        print(f'data: {data}')
+    def _process_received_data(self, data):
+        """Process data received from the client."""
         try:
             # Parse JSON data
             cmd_data = json.loads(data)
             command = cmd_data.get('command')
             params = cmd_data.get('params', {})
 
-            logger.info(f"Command received: {command}")
+            logger.info(f"Command received: {command}, params: {params}")
 
             # Process command with appropriate handler
             if command == 'forward':
@@ -152,8 +150,13 @@ class CarBluetoothServer:
                 })
 
             elif command == 'scan':
-                # Run scan operation in event loop and wait for result
-                asyncio.run_coroutine_threadsafe(self._handle_scan(), self.loop)
+                # Create future for async operation
+                future = asyncio.run_coroutine_threadsafe(self._handle_scan(), self.loop)
+                # Wait for result (optional, but ensures we get the response)
+                try:
+                    future.result(timeout=10)
+                except Exception as e:
+                    logger.error(f"Error in scan operation: {str(e)}")
 
             elif command == 'see':
                 self._handle_see()
@@ -162,7 +165,11 @@ class CarBluetoothServer:
                 self._handle_blind()
 
             elif command == 'visualization':
-                asyncio.run_coroutine_threadsafe(self._handle_visualization(), self.loop)
+                future = asyncio.run_coroutine_threadsafe(self._handle_visualization(), self.loop)
+                try:
+                    future.result(timeout=5)
+                except Exception as e:
+                    logger.error(f"Error in visualization operation: {str(e)}")
 
             else:
                 self._send_error(f"Unknown command: {command}")
@@ -339,18 +346,20 @@ class CarBluetoothServer:
 
 def main():
     """Main function."""
+    server = None
+
     try:
         # Create and start the Bluetooth server
         server = CarBluetoothServer()
         if server.start():
-            # Run the event loop to keep the program alive and processing async tasks
+            # Run the event loop to keep the program alive
             server.loop.run_forever()
         else:
             logger.error("Failed to start Bluetooth server")
             return 1
 
     except KeyboardInterrupt:
-        logger.info("Shutting down...")
+        logger.info("Shutting down due to keyboard interrupt...")
 
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}")
@@ -358,7 +367,7 @@ def main():
 
     finally:
         # Clean up resources
-        if 'server' in locals():
+        if server:
             server.stop()
 
     return 0
