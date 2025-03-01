@@ -43,8 +43,9 @@ class CarBluetoothServer:
         """Initialize the Bluetooth server and car control system."""
         # Initialize the event loop in a separate thread
         self.loop = asyncio.new_event_loop()
-        self.thread = threading.Thread(target=self._run_event_loop, daemon=True)
-        self.thread.start()
+        # self.thread = threading.Thread(target=self._run_event_loop, daemon=True)
+        # self.thread.start()
+        self.commands = Commands()
 
         # Initialize the server
         self.server = None
@@ -52,28 +53,25 @@ class CarBluetoothServer:
         self.video_thread = None
         self.video_enabled = False
 
-    def _run_event_loop(self):
-        """Run the asyncio event loop in a separate thread."""
-        asyncio.set_event_loop(self.loop)
+    # def _run_event_loop(self):
+    #     """Run the asyncio event loop in a separate thread."""
+    #     asyncio.set_event_loop(self.loop)
+    #
+    #     # Initialize the car control system
+    #     self.commands = Commands()
+    #
+    #     # Initialize monitoring tasks
+    #     self._initialize_tasks()
+    #
+    #     # Run the event loop
+    #     self.loop.run_forever()
 
-        # Initialize the car control system
-        self.commands = Commands()
-
-        # Initialize monitoring tasks
-        self._initialize_tasks()
-
-        # Run the event loop
-        self.loop.run_forever()
-
-    def _initialize_tasks(self):
-        """Initialize all monitoring tasks."""
-        # Run in the event loop thread
-        self.commands.state.ultrasonic_task = self.loop.create_task(
-            self.commands.object_system.ultrasonic_monitoring())
-        self.commands.state.cliff_task = self.loop.create_task(
-            self.commands.object_system.cliff_monitoring())
-        self.commands.state.pos_track_task = self.loop.create_task(
-            self.commands.object_system.px.continuous_position_tracking())
+    # def _initialize_tasks(self):
+    #     """Initialize all monitoring tasks."""
+    #     # Run in the event loop thread
+    #     self.commands.state.ultrasonic_task = self.loop.create_task(self.commands.object_system.ultrasonic_monitoring())
+    #     self.commands.state.cliff_task = self.loop.create_task(self.commands.object_system.cliff_monitoring())
+    #     self.commands.state.pos_track_task = self.loop.create_task(self.commands.object_system.px.continuous_position_tracking())
 
     def start(self):
         """Start the Bluetooth server."""
