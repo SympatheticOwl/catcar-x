@@ -64,7 +64,8 @@ class CarBluetoothServer:
             self.server = BluetoothServer(
                 self._data_received,
                 when_client_connects=self._client_connected,
-                when_client_disconnects=self._client_disconnected
+                when_client_disconnects=self._client_disconnected,
+                port=2
             )
 
             logger.info(f"Bluetooth server started on {self.server.server_address}")
