@@ -101,14 +101,10 @@ class WorldMap3:
         # - Positive is clockwise (right)
         # - Negative is counter-clockwise (left)
 
-        # The robot's heading is in the same convention as the world coordinates:
-        # - 0° is east
-        # - 90° is north
-
         # To convert sensor angle to absolute angle:
         # 1. Start with robot's heading (direction it's facing)
-        # 2. Adjust by the sensor angle (but flip the sign since sensor + is clockwise)
-        absolute_angle = (self.state.heading - angle) % 360
+        # 2. Add the sensor angle (since we want to rotate from the heading)
+        absolute_angle = (self.state.heading + angle) % 360
 
         # Convert to radians
         angle_rad = math.radians(absolute_angle)
