@@ -20,36 +20,16 @@
     <button id="down" disabled>↓</button>
 </div>
 
-<div class="button-row">
-    <button id="scanEnv" disabled>Scan Environment</button>
-    <span id="scanProgress" style="display: none; margin-left: 10px;">
-        <span class="spinner"></span> Scanning... This may take up to 30 seconds
-    </span>
-</div>
-
-<div id="videoContainer">
-    <img id="videoFeed" style="display: none;">
-</div>
-
-<div id="mapContainer" style="margin: 20px auto; text-align: center;">
-    <h2>Environment Map</h2>
-    <img id="mapVisualization" style="max-width: 100%; margin-top: 10px;">
-    <pre id="asciiMap" style="text-align: left; font-family: monospace; overflow-x: auto;"></pre>
-</div>
-
 <script>
     // Use the local client bridge server URL
     const API_URL = window.location.origin; // e.g., http://localhost:8080
     const status = document.getElementById('status');
-    const videoFeed = document.getElementById('videoFeed');
     const btAddress = document.getElementById('btAddress');
     const connectButton = document.getElementById('connectButton');
     const disconnectButton = document.getElementById('disconnectButton');
     const connectionStatus = document.getElementById('connectionStatus');
-    const scanProgress = document.getElementById('scanProgress');
 
     let isConnected = false;
-    let videoInterval;
 
     // Connect to the Raspberry Pi via Bluetooth
     connectButton.addEventListener('click', async function () {
@@ -78,7 +58,7 @@
                 status.textContent = `Status: ${data.message}`;
 
                 // Enable control buttons
-                document.querySelectorAll('.controls button, #scanEnv').forEach(button => {
+                document.querySelectorAll('.controls button').forEach(button => {
                     button.disabled = false;
                 });
 
@@ -110,7 +90,7 @@
             status.textContent = `Status: ${data.message}`;
 
             // Disable control buttons
-            document.querySelectorAll('.controls button, #scanEnv').forEach(button => {
+            document.querySelectorAll('.controls button').forEach(button => {
                 button.disabled = true;
             });
 
@@ -213,71 +193,6 @@
     setupButton('down', 'backward');
     setupButton('left', 'left', -30);
     setupButton('right', 'right', 30);
-
-    // Scan environment button
-    document.getElementById('scanEnv').addEventListener('click', async function () {
-        if (!isConnected) {
-            status.textContent = 'Status: Not connected to Raspberry Pi';
-            return;
-        }
-
-        try {
-            // Show loading state
-            this.disabled = true;
-            scanProgress.style.display = 'inline-block';
-            status.textContent = 'Status: Scanning environment... (this may take up to 30 seconds)';
-
-            // Clear previous visualization
-            const mapImg = document.getElementById('mapVisualization');
-            mapImg.style.display = 'none';
-            const asciiMap = document.getElementById('asciiMap');
-            asciiMap.style.display = 'none';
-
-            // Get the scan data with extended timeout
-            const response = await sendCommand('scan', { timeout: 90000 }); // 90 second timeout
-            console.log("Scan response:", response); // Debug log
-
-            // Hide progress indicator
-            scanProgress.style.display = 'none';
-
-            if (response && response.status === 'success') {
-                // Display the matplotlib visualization
-                if (response.data && response.data.plot_image) {
-                    mapImg.src = `data:image/png;base64,${response.data.plot_image}`;
-                    mapImg.style.display = 'block';
-                } else {
-                    console.error("Missing plot_image in response data");
-                    mapImg.style.display = 'none';
-                }
-
-                // Display the ASCII map
-                if (response.data && response.data.grid_data && response.data.grid_data.grid) {
-                    // Create ASCII representation
-                    const grid = response.data.grid_data.grid;
-                    const asciiRepresentation = grid.map(row =>
-                        row.map(cell => cell === 2 ? 'C' : cell === 1 ? '#' : '.').join('')
-                    ).join('\n');
-                    asciiMap.textContent = asciiRepresentation;
-                    asciiMap.style.display = 'block';
-                } else {
-                    console.error("Missing grid_data in response");
-                    asciiMap.style.display = 'none';
-                    asciiMap.textContent = 'No map data available';
-                }
-
-                status.textContent = 'Status: Scan complete';
-            } else {
-                status.textContent = `Status: Error - ${response ? (response.message || 'Scan failed') : 'No response'}`;
-                console.error("Scan failed:", response);
-            }
-        } catch (error) {
-            scanProgress.style.display = 'none';
-            status.textContent = `Error: ${error.message}`;
-            console.error("Scan error:", error);
-        } finally {
-            this.disabled = false;
-        }
-    });
 
     // Keyboard controls
     document.addEventListener('keydown', async function (event) {
@@ -391,12 +306,12 @@
                     }
                 })
                 .catch(error => {
-                    // Don't count abort errors (timeouts) as connection failures
-                    // during scan operations - the server might just be busy
-                    if (error.name === 'AbortError' && scanProgress.style.display === 'inline-block') {
-                        console.log('Status check timed out during scanning operation - ignoring');
-                        return;
-                    }
+                    // // Don't count abort errors (timeouts) as connection failures
+                    // // during scan operations - the server might just be busy
+                    // if (error.name === 'AbortError' && scanProgress.style.display === 'inline-block') {
+                    //     console.log('Status check timed out during scanning operation - ignoring');
+                    //     return;
+                    // }
 
                     console.error('Status check failed:', error);
                     // If status check fails multiple times, consider disconnected
@@ -410,7 +325,7 @@
                             isConnected = false;
 
                             // Disable control buttons
-                            document.querySelectorAll('.controls button, #scanEnv').forEach(button => {
+                            document.querySelectorAll('.controls button').forEach(button => {
                                 button.disabled = true;
                             });
 

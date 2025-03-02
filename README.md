@@ -18,3 +18,8 @@
 3. fix bluetooth ascii map display
 4. fix world map scanning and interpolation
 5. return controllers as fragments for htmx swap?
+
+# UI TODOs:
+1. add css back to composite index
+2. status messages
+3. loading spinners
