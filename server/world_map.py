@@ -85,32 +85,25 @@ class WorldMap3:
         relative to the robot's current position and heading
 
         Args:
-            angle: Angle in degrees (relative to robot's heading)
+            angle: Angle in degrees (relative to servo's center position)
             distance: Distance in cm
 
         Returns:
             (x, y): Cartesian coordinates (cm) in world space
         """
-        # The servo angle might be in a different reference frame than the robot's heading
-        # We need to adjust how we combine them
+        # The problem may be that the scan_surroundings function is passing angles
+        # in a different convention than expected
 
-        # For robotics, often 0° is forward, 90° is right, 180° is backward, 270° is left
-        # Convert to standard mathematical convention (0° east, 90° north, etc.)
+        # Try a completely different approach: invert Y coordinates
+        # This approach is based on the observation that the scan appears mirrored vertically
 
-        # Adjust angle based on how servo is mounted
-        # If servo angles are clockwise but math convention is counterclockwise:
-        adjusted_angle = -angle
-
-        # Calculate absolute angle in world coordinates
-        # If robot heading 0° means robot is facing east (standard math convention)
-        absolute_angle = (self.state.heading + adjusted_angle) % 360
-
-        # Convert to radians
+        # Calculate standard absolute angle first
+        absolute_angle = (self.state.heading + angle) % 360
         angle_rad = math.radians(absolute_angle)
 
-        # Calculate offsets using standard trig convention
+        # Calculate offsets with inverted Y axis
         x_offset = distance * math.cos(angle_rad)
-        y_offset = distance * math.sin(angle_rad)
+        y_offset = -distance * math.sin(angle_rad)  # Invert Y
 
         # Add offsets to robot's current position
         world_x = self.state.x + x_offset
