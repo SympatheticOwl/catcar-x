@@ -30,7 +30,6 @@ class PicarXBridge:
         self.frame_queue = queue.Queue(maxsize=10)  # Limit queue size for video frames
         self.pending_commands = {}  # Track commands waiting for responses
         self.command_lock = threading.Lock()  # Lock for thread safety
-        self.response_timeout = 30  # Increase timeout further for scan operations
 
         # Buffer for accumulating large responses
         self.data_buffer = ""
@@ -262,26 +261,10 @@ class PicarXBridge:
         if params is None:
             params = {}
 
-        # Use provided timeout or default
-        if timeout is None:
-            # For scan command, use longer timeout
-            if cmd == 'scan':
-                timeout = 120  # 120 seconds timeout for scan
-            else:
-                timeout = 30  # Default 30 seconds for other commands
-
         try:
             # Generate a unique command ID
             import uuid
             cmd_id = str(uuid.uuid4())
-
-            # For scan command, set the flag for expecting large response
-            if cmd == 'scan':
-                with self.buffer_lock:
-                    self.expecting_large_response = True
-                    self.last_command_id = cmd_id
-                    # Clear buffer before scan command
-                    self.data_buffer = ""
 
             # Prepare the command with ID
             command = {
@@ -298,10 +281,12 @@ class PicarXBridge:
             with self.command_lock:
                 self.pending_commands[cmd_id] = cmd_queue
 
-            # Send the command
+            # Send the command - CONVERT STRING TO BYTES HERE
             command_json = json.dumps(command)
             print(f"Sending command: {command_json}")
-            self.client.send(command_json)
+
+            # Encode the string to bytes before sending
+            self.client.send(command_json.encode('utf-8'))
             print(f"Command sent with ID: {cmd_id}")
 
             # For movement commands, don't wait for response
@@ -312,10 +297,6 @@ class PicarXBridge:
                         del self.pending_commands[cmd_id]
                 # Return a default response immediately for movement commands
                 return {"status": "success", "message": f"Sent {cmd} command"}
-
-            # Special handling for scan command
-            if cmd == 'scan':
-                print(f"Waiting for scan response with timeout: {timeout} seconds")
 
             # Wait for response with timeout
             try:
@@ -328,13 +309,6 @@ class PicarXBridge:
                     if cmd_id in self.pending_commands:
                         del self.pending_commands[cmd_id]
 
-                # Clean up large response state if needed
-                if cmd == 'scan':
-                    with self.buffer_lock:
-                        self.expecting_large_response = False
-                        self.last_command_id = None
-                        self.data_buffer = ""
-
                 return response
             except queue.Empty:
                 print(f"Timeout waiting for response to command {cmd_id}")
@@ -342,34 +316,6 @@ class PicarXBridge:
                 with self.command_lock:
                     if cmd_id in self.pending_commands:
                         del self.pending_commands[cmd_id]
-
-                # Clean up large response state if needed
-                if cmd == 'scan':
-                    with self.buffer_lock:
-                        self.expecting_large_response = False
-                        self.last_command_id = None
-
-                        # If we have data in buffer but it's incomplete, log it
-                        if self.data_buffer:
-                            print(f"Incomplete data in buffer when timeout occurred: {len(self.data_buffer)} bytes")
-                            # Try to recover anything we can from the buffer
-                            try:
-                                if self.data_buffer.startswith('{') and '}' in self.data_buffer:
-                                    # Find the last closing brace
-                                    last_brace = self.data_buffer.rindex('}')
-                                    partial_json = self.data_buffer[:last_brace + 1]
-                                    try:
-                                        partial_response = json.loads(partial_json)
-                                        print("Recovered partial JSON from buffer")
-                                        self.data_buffer = ""
-                                        return partial_response
-                                    except:
-                                        print("Failed to recover JSON from buffer")
-                            except:
-                                pass
-
-                        # Clear buffer
-                        self.data_buffer = ""
 
                 return {"status": "error", "message": f"Timeout waiting for response to {cmd}"}
 
@@ -470,40 +416,8 @@ def execute_command(cmd):
         if angle:
             params['angle'] = angle
 
-    # Special handling for scan command
-    if cmd == 'scan':
-        print("Executing scan command with extended timeout...")
-        # Use longer timeout for scan command
-        response = bridge.send_command('command', cmd, params, timeout=120)
-    else:
-        # Send the command to the Pi with default timeout
-        response = bridge.send_command('command', cmd, params)
-
-    # Debug logging for scan command
-    if cmd == 'scan':
-        print(f"Scan response received, status: {response.get('status')}")
-        if response.get('status') == 'success' and 'data' in response:
-            data_keys = list(response['data'].keys()) if isinstance(response['data'], dict) else 'Not a dict'
-            print(f"Scan data contains keys: {data_keys}")
-
-            # Check if visualization data exists
-            if isinstance(response['data'], dict):
-                if 'plot_image' in response['data']:
-                    img_length = len(response['data']['plot_image']) if response['data']['plot_image'] else 0
-                    print(f"plot_image length: {img_length}")
-                else:
-                    print("plot_image is missing")
-
-                if 'grid_data' in response['data']:
-                    if isinstance(response['data']['grid_data'], dict) and 'grid' in response['data']['grid_data']:
-                        grid_size = len(response['data']['grid_data']['grid']) if response['data']['grid_data'][
-                            'grid'] else 0
-                        print(
-                            f"grid size: {grid_size}x{len(response['data']['grid_data']['grid'][0]) if grid_size > 0 else 0}")
-                    else:
-                        print("grid is missing or malformed in grid_data")
-                else:
-                    print("grid_data is missing")
+    # Send the command to the Pi with default timeout
+    response = bridge.send_command('command', cmd, params)
 
     print(f"Command {cmd} response: {response}")
     return jsonify(response)
