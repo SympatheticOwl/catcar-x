@@ -82,44 +82,45 @@ class WorldMap3:
     def polar_to_cartesian(self, angle: float, distance: float) -> Tuple[float, float]:
         """
         Convert polar coordinates (angle, distance) to cartesian coordinates
-        relative to the robot's current position and heading
+        relative to the robot's current position and heading.
+
+        This method properly transforms from robot-relative coordinates to world coordinates
+        using a rotation matrix to account for the robot's heading.
+
+        The key insight is to:
+        1. First convert the polar coordinates (angle, distance) to cartesian coordinates
+           in the robot's reference frame
+        2. Then apply a rotation matrix based on the robot's heading to convert to the
+           world reference frame
+        3. Finally, add the robot's position to get world coordinates
 
         Args:
-            angle: Angle in degrees (servo angle relative to robot's forward direction)
+            angle: Servo angle in degrees (relative to robot's forward direction)
+               where 0° is forward, negative angles are to the left, positive to the right
             distance: Distance in cm
 
         Returns:
             (x, y): Cartesian coordinates (cm) in world space
         """
-        # There are multiple coordinate systems at play here:
-        #
-        # 1. Robot-centric:
-        #    - 0° is the robot's forward direction
-        #    - Positive angles are clockwise
-        #    - Negative angles are counterclockwise
-        #
-        # 2. World coordinates:
-        #    - X increases to the right/east
-        #    - Y increases upward/north
-        #    - Origin is at (0,0)
+        # Convert servo angle to radians
+        servo_angle_rad = math.radians(angle)
 
-        # Calculate the global angle in the robot's coordinate system
-        # by adding the servo angle to the robot's heading
-        global_angle = (self.state.heading + angle) % 360
+        # Calculate position in robot's coordinate frame
+        # In robot frame, x is forward, y is left
+        robot_x = distance * math.cos(servo_angle_rad)
+        robot_y = distance * math.sin(servo_angle_rad)
 
-        # Convert to radians
-        angle_rad = math.radians(global_angle)
+        # Convert robot's heading to radians
+        heading_rad = math.radians(self.state.heading)
 
-        # Calculate the x and y components in the world coordinate system
-        # For a standard 2D coordinate system where:
-        # - 0° is to the right (east, +x direction)
-        # - 90° is up (north, +y direction)
-        x_offset = distance * math.cos(angle_rad)
-        y_offset = distance * math.sin(angle_rad)
+        # Apply rotation matrix to transform from robot frame to world frame
+        # This rotates the point around the robot's position by the heading angle
+        world_x_offset = robot_x * math.cos(heading_rad) - robot_y * math.sin(heading_rad)
+        world_y_offset = robot_x * math.sin(heading_rad) + robot_y * math.cos(heading_rad)
 
-        # Add to robot's current position
-        world_x = self.state.x + x_offset
-        world_y = self.state.y + y_offset
+        # Add to robot's current position to get world coordinates
+        world_x = self.state.x + world_x_offset
+        world_y = self.state.y + world_y_offset
 
         return world_x, world_y
 
