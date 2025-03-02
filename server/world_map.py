@@ -85,25 +85,34 @@ class WorldMap3:
         relative to the robot's current position and heading
 
         Args:
-            angle: Angle in degrees (relative to servo's center position)
+            angle: Angle in degrees (relative to robot's center position)
             distance: Distance in cm
 
         Returns:
             (x, y): Cartesian coordinates (cm) in world space
         """
-        # The problem may be that the scan_surroundings function is passing angles
-        # in a different convention than expected
+        # Convert servo angle and robot heading to a common convention
+        # Your scan is from -60 to 60 degrees where 0 is forward relative to the car
+        # But your heading is defined where 0 is forward and positive is clockwise
+        # While standard math uses 0 as east and positive is counterclockwise
 
-        # Try a completely different approach: invert Y coordinates
-        # This approach is based on the observation that the scan appears mirrored vertically
+        # First convert both to standard mathematical convention
+        # For heading: Since 0° is forward in robot but east in math, we need to subtract 90°
+        # (and handle negative angles by adding 360°)
+        math_heading = (self.state.heading - 90) % 360
 
-        # Calculate standard absolute angle first
-        absolute_angle = (self.state.heading + angle) % 360
+        # For servo angle: need to negate since your positive is clockwise
+        math_servo_angle = -angle
+
+        # Calculate absolute angle in standard math convention
+        absolute_angle = (math_heading + math_servo_angle) % 360
+
+        # Convert to radians
         angle_rad = math.radians(absolute_angle)
 
-        # Calculate offsets with inverted Y axis
+        # Calculate offsets
         x_offset = distance * math.cos(angle_rad)
-        y_offset = -distance * math.sin(angle_rad)  # Invert Y
+        y_offset = distance * math.sin(angle_rad)
 
         # Add offsets to robot's current position
         world_x = self.state.x + x_offset
