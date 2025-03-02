@@ -80,18 +80,37 @@ class WorldMap3:
         return grid_x, grid_y
 
     def polar_to_cartesian(self, angle: float, distance: float) -> Tuple[float, float]:
-        # Invert the angle to match the coordinate system
-        inverted_angle = -angle
+        """
+        Convert polar coordinates (angle, distance) to cartesian coordinates
+        relative to the robot's current position and heading
+
+        Args:
+            angle: Angle in degrees (relative to robot's heading)
+            distance: Distance in cm
+
+        Returns:
+            (x, y): Cartesian coordinates (cm) in world space
+        """
+        # The servo angle might be in a different reference frame than the robot's heading
+        # We need to adjust how we combine them
+
+        # For robotics, often 0° is forward, 90° is right, 180° is backward, 270° is left
+        # Convert to standard mathematical convention (0° east, 90° north, etc.)
+
+        # Adjust angle based on how servo is mounted
+        # If servo angles are clockwise but math convention is counterclockwise:
+        adjusted_angle = -angle
 
         # Calculate absolute angle in world coordinates
-        absolute_angle = (self.state.heading + inverted_angle) % 360
+        # If robot heading 0° means robot is facing east (standard math convention)
+        absolute_angle = (self.state.heading + adjusted_angle) % 360
 
         # Convert to radians
         angle_rad = math.radians(absolute_angle)
 
-        # Calculate offsets with adjusted coordinate system
-        x_offset = distance * math.sin(angle_rad)
-        y_offset = distance * math.cos(angle_rad)
+        # Calculate offsets using standard trig convention
+        x_offset = distance * math.cos(angle_rad)
+        y_offset = distance * math.sin(angle_rad)
 
         # Add offsets to robot's current position
         world_x = self.state.x + x_offset
