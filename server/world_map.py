@@ -80,24 +80,30 @@ class WorldMap3:
         return grid_x, grid_y
 
     def polar_to_cartesian(self, angle: float, distance: float) -> Tuple[float, float]:
-        # The servo angle needs to be negated to match the actual orientation
-        corrected_angle = -angle
+        """
+        Convert polar coordinates (angle, distance) to cartesian coordinates
+        relative to the robot's current position and heading
+
+        Args:
+            angle: Angle in degrees (relative to robot's heading)
+            distance: Distance in cm
+
+        Returns:
+            (x, y): Cartesian coordinates (cm) in world space
+        """
+        # Calculate absolute angle in world coordinates
+        absolute_angle = (self.state.heading + angle) % 360
 
         # Convert to radians
-        servo_angle_rad = math.radians(corrected_angle)
-        heading_rad = math.radians(self.state.heading)
+        angle_rad = math.radians(absolute_angle)
 
-        # Calculate position in robot's coordinate frame
-        robot_x = distance * math.cos(servo_angle_rad)
-        robot_y = distance * math.sin(servo_angle_rad)
+        # Calculate offsets
+        x_offset = distance * math.cos(angle_rad)
+        y_offset = distance * math.sin(angle_rad)
 
-        # Apply rotation to transform from robot frame to world frame
-        world_x_offset = robot_x * math.cos(heading_rad) - robot_y * math.sin(heading_rad)
-        world_y_offset = robot_x * math.sin(heading_rad) + robot_y * math.cos(heading_rad)
-
-        # Add to robot's current position to get world coordinates
-        world_x = self.state.x + world_x_offset
-        world_y = self.state.y + world_y_offset
+        # Add offsets to robot's current position
+        world_x = self.state.x + x_offset
+        world_y = self.state.y + y_offset
 
         return world_x, world_y
 
