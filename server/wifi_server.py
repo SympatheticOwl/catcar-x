@@ -48,6 +48,7 @@ class WifiServer:
     def __init__(self, commands: Commands):
         self.manager = AsyncCommandManager(commands)
         # app.run(host="192.168.0.163", port=8000)
+        global app
         app.run(host="10.0.0.219", port=8000)
 
 

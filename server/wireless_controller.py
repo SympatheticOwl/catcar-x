@@ -7,8 +7,10 @@ if __name__ == "__main__":
     try:
         commands = Commands()
         wifi_server = WifiServer(commands)
+        print("Wifi Server Running...")
         bt_server = BluetoothServer(commands)
-        print("Servers running. Press Ctrl+C to exit.")
+        print("Bluetooth Server Running...")
+        print("Press Ctrl+C to exit.")
 
         # Keep the main thread alive
         while True:
