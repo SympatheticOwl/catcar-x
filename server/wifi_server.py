@@ -11,16 +11,16 @@ import threading
 from commands import Commands  # Assuming commands.py contains the Commands class
 
 class AsyncCommandManager:
-    def __init__(self):
+    def __init__(self, commands: Commands):
         self.loop = asyncio.new_event_loop()
-        self.commands = None
+        self.commands = commands
         self.thread = threading.Thread(target=self._run_event_loop, daemon=True)
         self.thread.start()
 
     def _run_event_loop(self):
         """Runs the event loop in a separate thread"""
         asyncio.set_event_loop(self.loop)
-        self.commands = Commands()
+        # self.commands = Commands()
 
         # Initialize monitoring tasks in the event loop
         self.loop.run_until_complete(self._initialize_commands())
@@ -45,9 +45,10 @@ class AsyncCommandManager:
 app = Flask(__name__)
 
 class WifiServer:
-    def __init__(self):
-        self.manager = AsyncCommandManager()
-        app.run(host="192.168.0.163", port=8000)
+    def __init__(self, commands: Commands):
+        self.manager = AsyncCommandManager(commands)
+        # app.run(host="192.168.0.163", port=8000)
+        app.run(host="10.0.0.219", port=8000)
 
 
     @app.after_request

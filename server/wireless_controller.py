@@ -1,11 +1,13 @@
 import time
 from bt_server import BluetoothServer
+from commands import Commands
 from wifi_server import WifiServer
 
 if __name__ == "__main__":
     try:
-        wifi_server = WifiServer()
-        bt_server = BluetoothServer()
+        commands = Commands()
+        wifi_server = WifiServer(commands)
+        bt_server = BluetoothServer(commands)
         print("Servers running. Press Ctrl+C to exit.")
 
         # Keep the main thread alive

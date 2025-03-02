@@ -34,16 +34,16 @@ os.environ['MPLBACKEND'] = 'Agg'  # Force matplotlib to use Agg backend
 
 
 class AsyncCommandManager:
-    def __init__(self):
+    def __init__(self, commands: Commands):
         self.loop = asyncio.new_event_loop()
-        self.commands = None
+        self.commands = commands
         self.thread = threading.Thread(target=self._run_event_loop, daemon=True)
         self.thread.start()
 
     def _run_event_loop(self):
         """Runs the event loop in a separate thread"""
         asyncio.set_event_loop(self.loop)
-        self.commands = Commands()
+        # self.commands = Commands()
 
         # Initialize monitoring tasks in the event loop
         self.loop.run_until_complete(self._initialize_commands())
@@ -76,9 +76,9 @@ class AsyncCommandManager:
 
 
 class BluetoothServer:
-    def __init__(self):
+    def __init__(self, commands: Commands):
         print("Initializing Bluetooth server for PicarX...")
-        self.manager = AsyncCommandManager()
+        self.manager = AsyncCommandManager(commands)
         self.server = BluetoothServer(self.data_received, when_client_connects=self.client_connected,
                                       when_client_disconnects=self.client_disconnected,
                                       port=2,
