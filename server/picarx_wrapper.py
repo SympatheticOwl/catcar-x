@@ -42,13 +42,13 @@ class PicarXWrapper:
                     heading_rad = math.radians(self.__state.heading - angle_turned / 2)  # Use average heading for arc
 
                     # Calculate arc movement
-                    self.x += distance * math.cos(heading_rad)
-                    self.y += distance * math.sin(heading_rad)
+                    self.__state.x += distance * math.cos(heading_rad)
+                    self.__state.y += distance * math.sin(heading_rad)
 
                 else:  # Straight movement
                     heading_rad = math.radians(self.__state.heading)
-                    self.x += distance * math.cos(heading_rad)
-                    self.y += distance * math.sin(heading_rad)
+                    self.__state.x += distance * math.cos(heading_rad)
+                    self.__state.y += distance * math.sin(heading_rad)
 
             self.__state.last_position_update = current_time
             print(f"x: {self.__state.x}, y: {self.__state.y}, heading: {self.__state.heading}")
