@@ -5,7 +5,7 @@ import threading
 import asyncio
 import numpy as np
 import time
-from bluedot.btcomm import BluetoothServer
+from bluedot.btcomm import BluetoothServer as BlueDotServer
 from commands import Commands  # Assuming commands.py contains the Commands class
 
 
@@ -79,7 +79,7 @@ class BluetoothServer:
     def __init__(self, commands: Commands):
         print("Initializing Bluetooth server for PicarX...")
         self.manager = AsyncCommandManager(commands)
-        self.server = BluetoothServer(self.data_received, when_client_connects=self.client_connected,
+        self.server = BlueDotServer(self.data_received, when_client_connects=self.client_connected,
                                       when_client_disconnects=self.client_disconnected,
                                       port=2,
                                       auto_start=False)
@@ -499,21 +499,3 @@ class BluetoothServer:
             self.video_thread.join(timeout=5)
         self.manager.cleanup()
         self.server.stop()
-
-
-if __name__ == "__main__":
-    try:
-        server = BluetoothServer()
-        print("Server running. Press Ctrl+C to exit.")
-
-        # Keep the main thread alive
-        while True:
-            time.sleep(1)
-
-    except KeyboardInterrupt:
-        print("\nShutting down server...")
-    except Exception as e:
-        print(f"Error: {e}")
-    finally:
-        if 'server' in locals():
-            server.cleanup()
