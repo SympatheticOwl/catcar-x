@@ -1,4 +1,5 @@
 import os
+
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'  # Tell Qt to not use GUI
 os.environ['OPENCV_VIDEOIO_PRIORITY_BACKEND'] = 'v4l2'  # Use V4L2 backend for OpenCV
 os.environ['MPLBACKEND'] = 'Agg'  # Force matplotlib to use Agg backend
@@ -9,6 +10,7 @@ from typing import Dict, Optional
 import asyncio
 import threading
 from commands import Commands  # Assuming commands.py contains the Commands class
+
 
 class AsyncCommandManager:
     def __init__(self, commands: Commands):
@@ -40,19 +42,32 @@ class AsyncCommandManager:
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
         return future.result()
 
-    pass
 
+# Create Flask app - now it's a standalone object, not within a class method
 app = Flask(__name__)
+
 
 class WifiServer:
     def __init__(self, commands: Commands):
         self.manager = AsyncCommandManager(commands)
-        # app.run(host="192.168.0.163", port=8000)
-        global app
-        app.run(host="10.0.0.219", port=8000)
+        # Store reference to the global app
+        self.app = app
 
+        # Register routes with decorator functions
+        self.register_routes()
 
-    @app.after_request
+    def register_routes(self):
+        """Register all Flask routes"""
+        # Attach class methods to app routes
+        self.app.after_request(self.after_request)
+        self.app.route('/video_feed')(self.video_feed)
+        self.app.route("/command/scan", methods=['POST'])(self.scan_command)
+        self.app.route("/command/<cmd>", methods=['POST'])(self.execute_command)
+        self.app.route("/status", methods=['GET'])(self.get_status)
+        self.app.route("/world-state", methods=['GET'])(self.get_world_state)
+        self.app.route("/grid-data", methods=['GET'])(self.get_grid_data)
+        self.app.route("/visualization", methods=['GET', 'OPTIONS'])(self.get_visualization)
+
     def after_request(self, response):
         response.headers.add('Access-Control-Allow-Origin', '*')
         response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
@@ -78,7 +93,6 @@ class WifiServer:
             # Add a small delay to control frame rate
             time.sleep(0.033)  # ~30 fps
 
-    @app.route('/video_feed')
     def video_feed(self):
         """Video streaming route"""
         return Response(
@@ -86,7 +100,6 @@ class WifiServer:
             mimetype='multipart/x-mixed-replace; boundary=frame'
         )
 
-    @app.route("/command/scan", methods=['POST'])
     def scan_command(self):
         """Start a scan and return results immediately"""
         if not self.manager.commands:
@@ -118,8 +131,7 @@ class WifiServer:
                 "message": str(e)
             }), 500
 
-    @app.route("/command/<cmd>", methods=['POST'])
-    async def execute_command(self, cmd: str) -> Dict:
+    def execute_command(self, cmd: str):
         """Execute a command on the PicarX"""
         try:
             if not self.manager.commands:
@@ -205,8 +217,7 @@ class WifiServer:
                 "message": str(e)
             }), 500
 
-    @app.route("/status", methods=['GET'])
-    def get_status(self) -> Dict:
+    def get_status(self):
         """Get the current status of the PicarX"""
         if not self.manager.commands:
             return jsonify({
@@ -219,8 +230,7 @@ class WifiServer:
             "emergency_stop": self.manager.commands.state.emergency_stop_flag
         })
 
-    @app.route("/world-state", methods=['GET'])
-    def get_world_state(self) -> Dict:
+    def get_world_state(self):
         """Get the current status of the PicarX"""
         if not self.manager.commands:
             return jsonify({
@@ -232,8 +242,7 @@ class WifiServer:
             "state": self.manager.commands.world_state()
         })
 
-    @app.route("/grid-data", methods=['GET'])
-    def get_grid_data(self) -> Dict:
+    def get_grid_data(self):
         """Get the visual grid data of the world map"""
         if not self.manager.commands:
             return jsonify({
@@ -253,7 +262,6 @@ class WifiServer:
                 "message": str(e)
             }), 500
 
-    @app.route("/visualization", methods=['GET', 'OPTIONS'])
     def get_visualization(self):
         """Get the matplotlib visualization of the world map"""
         if request.method == 'OPTIONS':
@@ -299,4 +307,4 @@ class WifiServer:
 
         # Stop the event loop
         self.manager.loop.call_soon_threadsafe(self.manager.loop.stop)
-        self.manager.thread.join()
+        self.manager.thread.join(timeout=5)  # Add timeout to prevent hanging
