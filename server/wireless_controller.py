@@ -3,7 +3,6 @@ import threading
 from commands import Commands
 from bt_server import BTServer
 from wifi_server import WifiServer
-from flask import Flask
 
 if __name__ == "__main__":
     try:
@@ -15,12 +14,18 @@ if __name__ == "__main__":
         bt_server = BTServer(commands)
 
         # Start Flask server in a separate thread
-        flask_thread = threading.Thread(target=lambda: Flask.run(
-            app=wifi_server.app,
-            host="10.0.0.219",  # Use your desired IP address
-            port=8000,
-            use_reloader=False  # Important: disable reloader to avoid creating duplicate threads
-        ), daemon=True)
+        # Use the app instance's run method, not the Flask class method
+        flask_thread = threading.Thread(
+            target=wifi_server.app.run,
+            kwargs={
+                'host': "10.0.0.219",  # Use your desired IP address
+                'port': 8000,
+                'use_reloader': False,  # Important: disable reloader to avoid creating duplicate threads
+                'debug': False,  # Disable debug mode to prevent auto-restarting
+                'threaded': True  # Enable Flask's internal threading
+            },
+            daemon=True
+        )
 
         # Start the Flask thread
         flask_thread.start()
