@@ -27,7 +27,7 @@ class PicarXWrapper:
 
                 if abs(self.__state.current_steering_angle) > 1:  # If turning
                     # Calculate turn radius for current steering angle
-                    turn_radius = self.WHEELBASE / math.tan(math.radians(abs(self.__state.current_steering_angle)))
+                    turn_radius = self.__state.WHEELBASE / math.tan(math.radians(abs(self.__state.current_steering_angle)))
 
                     # Calculate angular velocity (radians per second)
                     angular_velocity = self.__state.current_speed / turn_radius
@@ -51,7 +51,6 @@ class PicarXWrapper:
                     self.__state.y += distance * math.sin(heading_rad)
 
             self.__state.last_position_update = current_time
-            print(f"x: {self.__state.x}, y: {self.__state.y}, heading: {self.__state.heading}")
             await asyncio.sleep(0.05)
 
     def forward(self, speed = 30):
@@ -77,7 +76,7 @@ class PicarXWrapper:
     def set_dir_servo_angle(self, angle):
         """Set steering angle"""
         # Clamp steering angle
-        if self.__state.current_steering_angle + angle <= 30 and self.__state.current_steering_angle + angle >= -30:
+        if 30 >= self.__state.current_steering_angle + angle >= -30:
             self.__state.current_steering_angle += angle
         self.px.set_dir_servo_angle(self.__state.current_steering_angle)
 
