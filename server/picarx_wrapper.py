@@ -38,20 +38,21 @@ class PicarXWrapper:
                         angle_turned = -angle_turned
 
                     # Update heading
-                    self.heading = (self.heading + angle_turned) % 360
-                    heading_rad = math.radians(self.heading - angle_turned / 2)  # Use average heading for arc
+                    self.__state.heading = (self.__state.heading + angle_turned) % 360
+                    heading_rad = math.radians(self.__state.heading - angle_turned / 2)  # Use average heading for arc
 
                     # Calculate arc movement
                     self.x += distance * math.cos(heading_rad)
                     self.y += distance * math.sin(heading_rad)
 
                 else:  # Straight movement
-                    heading_rad = math.radians(self.heading)
+                    heading_rad = math.radians(self.__state.heading)
                     self.x += distance * math.cos(heading_rad)
                     self.y += distance * math.sin(heading_rad)
 
             self.__state.last_position_update = current_time
-            await asyncio.sleep(0.05)  # Update at 20Hz
+            print(f"x: {self.__state.x}, y: {self.__state.y}, heading: {self.__state.heading}")
+            await asyncio.sleep(0.05)
 
     def forward(self, speed = 30):
         """Move forward with speed tracking"""
