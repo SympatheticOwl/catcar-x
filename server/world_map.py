@@ -85,36 +85,39 @@ class WorldMap3:
         relative to the robot's current position and heading
 
         Args:
-            angle: Angle in degrees (relative to robot's center position)
+            angle: Angle in degrees (servo angle relative to robot's forward direction)
             distance: Distance in cm
 
         Returns:
             (x, y): Cartesian coordinates (cm) in world space
         """
-        # Convert servo angle and robot heading to a common convention
-        # Your scan is from -60 to 60 degrees where 0 is forward relative to the car
-        # But your heading is defined where 0 is forward and positive is clockwise
-        # While standard math uses 0 as east and positive is counterclockwise
+        # There are multiple coordinate systems at play here:
+        #
+        # 1. Robot-centric:
+        #    - 0° is the robot's forward direction
+        #    - Positive angles are clockwise
+        #    - Negative angles are counterclockwise
+        #
+        # 2. World coordinates:
+        #    - X increases to the right/east
+        #    - Y increases upward/north
+        #    - Origin is at (0,0)
 
-        # First convert both to standard mathematical convention
-        # For heading: Since 0° is forward in robot but east in math, we need to subtract 90°
-        # (and handle negative angles by adding 360°)
-        math_heading = (self.state.heading - 90) % 360
-
-        # For servo angle: need to negate since your positive is clockwise
-        math_servo_angle = -angle
-
-        # Calculate absolute angle in standard math convention
-        absolute_angle = (math_heading + math_servo_angle) % 360
+        # Calculate the global angle in the robot's coordinate system
+        # by adding the servo angle to the robot's heading
+        global_angle = (self.state.heading + angle) % 360
 
         # Convert to radians
-        angle_rad = math.radians(absolute_angle)
+        angle_rad = math.radians(global_angle)
 
-        # Calculate offsets
+        # Calculate the x and y components in the world coordinate system
+        # For a standard 2D coordinate system where:
+        # - 0° is to the right (east, +x direction)
+        # - 90° is up (north, +y direction)
         x_offset = distance * math.cos(angle_rad)
         y_offset = distance * math.sin(angle_rad)
 
-        # Add offsets to robot's current position
+        # Add to robot's current position
         world_x = self.state.x + x_offset
         world_y = self.state.y + y_offset
 
