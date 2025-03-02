@@ -91,29 +91,25 @@ class WorldMap3:
         Returns:
             (x, y): Cartesian coordinates (cm) in world space
         """
-        # The visualization uses the standard mathematical coordinate system:
-        # - x increases to the right
-        # - y increases upward
-        # - 0° is east (right), 90° is north (up)
+        # First, we need to understand the two coordinate systems:
+        # 1. Robot heading (0° is east, 90° is north)
+        # 2. Sensor angle (0° is robot's front, positive clockwise)
 
-        # The sensor angle is measured relative to the robot's front:
-        # - 0° is the direction the robot is facing
-        # - Positive is clockwise (right)
-        # - Negative is counter-clockwise (left)
+        # Calculate the absolute angle in world coordinates
+        # We need to add the sensor angle to the robot's heading,
+        # but the sign may need to be flipped because of differences in convention
 
-        # To convert sensor angle to absolute angle:
-        # 1. Start with robot's heading (direction it's facing)
-        # 2. Add the sensor angle (since we want to rotate from the heading)
-        absolute_angle = (self.state.heading + angle) % 360
+        # Try flipping the sensor angle sign
+        absolute_angle = (self.state.heading - angle) % 360
 
         # Convert to radians
         angle_rad = math.radians(absolute_angle)
 
-        # Calculate cartesian coordinates using standard formula
+        # Standard polar to Cartesian conversion
         x_offset = distance * math.cos(angle_rad)
         y_offset = distance * math.sin(angle_rad)
 
-        # Add to robot's position
+        # Add robot's position
         world_x = self.state.x + x_offset
         world_y = self.state.y + y_offset
 
