@@ -65,7 +65,6 @@ class WifiServer:
         self.app.route("/command/<cmd>", methods=['POST'])(self.execute_command)
         self.app.route("/status", methods=['GET'])(self.get_status)
         self.app.route("/world-state", methods=['GET'])(self.get_world_state)
-        self.app.route("/grid-data", methods=['GET'])(self.get_grid_data)
         self.app.route("/visualization", methods=['GET', 'OPTIONS'])(self.get_visualization)
 
     def after_request(self, response):
@@ -241,26 +240,6 @@ class WifiServer:
         return jsonify({
             "state": self.manager.commands.world_state()
         })
-
-    def get_grid_data(self):
-        """Get the visual grid data of the world map"""
-        if not self.manager.commands:
-            return jsonify({
-                "status": "error",
-                "message": "Server still initializing"
-            }), 503
-
-        try:
-            world_state = self.manager.commands.world_state()
-            return jsonify({
-                "status": "success",
-                "data": world_state['grid_data']
-            })
-        except Exception as e:
-            return jsonify({
-                "status": "error",
-                "message": str(e)
-            }), 500
 
     def get_visualization(self):
         """Get the matplotlib visualization of the world map"""
