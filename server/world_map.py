@@ -80,41 +80,18 @@ class WorldMap3:
         return grid_x, grid_y
 
     def polar_to_cartesian(self, angle: float, distance: float) -> Tuple[float, float]:
-        """
-        Convert polar coordinates (angle, distance) to cartesian coordinates
-        relative to the robot's current position and heading.
+        # The servo angle needs to be negated to match the actual orientation
+        corrected_angle = -angle
 
-        This method properly transforms from robot-relative coordinates to world coordinates
-        using a rotation matrix to account for the robot's heading.
-
-        The key insight is to:
-        1. First convert the polar coordinates (angle, distance) to cartesian coordinates
-           in the robot's reference frame
-        2. Then apply a rotation matrix based on the robot's heading to convert to the
-           world reference frame
-        3. Finally, add the robot's position to get world coordinates
-
-        Args:
-            angle: Servo angle in degrees (relative to robot's forward direction)
-               where 0° is forward, negative angles are to the left, positive to the right
-            distance: Distance in cm
-
-        Returns:
-            (x, y): Cartesian coordinates (cm) in world space
-        """
-        # Convert servo angle to radians
-        servo_angle_rad = math.radians(angle)
+        # Convert to radians
+        servo_angle_rad = math.radians(corrected_angle)
+        heading_rad = math.radians(self.state.heading)
 
         # Calculate position in robot's coordinate frame
-        # In robot frame, x is forward, y is left
         robot_x = distance * math.cos(servo_angle_rad)
         robot_y = distance * math.sin(servo_angle_rad)
 
-        # Convert robot's heading to radians
-        heading_rad = math.radians(self.state.heading)
-
-        # Apply rotation matrix to transform from robot frame to world frame
-        # This rotates the point around the robot's position by the heading angle
+        # Apply rotation to transform from robot frame to world frame
         world_x_offset = robot_x * math.cos(heading_rad) - robot_y * math.sin(heading_rad)
         world_y_offset = robot_x * math.sin(heading_rad) + robot_y * math.cos(heading_rad)
 
