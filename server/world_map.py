@@ -80,8 +80,11 @@ class WorldMap3:
         return grid_x, grid_y
 
     def polar_to_cartesian(self, angle: float, distance: float) -> Tuple[float, float]:
+        # Invert the angle to match the coordinate system
+        inverted_angle = -angle
+
         # Calculate absolute angle in world coordinates
-        absolute_angle = (self.state.heading + angle) % 360
+        absolute_angle = (self.state.heading + inverted_angle) % 360
 
         # Convert to radians
         angle_rad = math.radians(absolute_angle)
