@@ -22,7 +22,6 @@
 </div>
 <div id="mapContainer" style="margin: 20px auto; text-align: center;">
     <h2>Environment Map</h2>
-    <img id="mapVisualization" style="max-width: 100%; margin-top: 10px;">
     <pre id="asciiMap" style="text-align: left; font-family: monospace; overflow-x: auto;"></pre>
 </div>
 
@@ -132,12 +131,9 @@
             // Get the visualization data
             const response = await fetch(`${API_URL}/visualization`);
             const data = await response.json();
+            console.log(data)
 
             if (data.status === 'success') {
-                // Display the matplotlib visualization
-                const mapImg = document.getElementById('mapVisualization');
-                mapImg.src = `data:image/png;base64,${data.data.plot_image}`;
-
                 // Display the ASCII map
                 const asciiMap = document.getElementById('asciiMap');
                 if (data.data.grid_data && data.data.grid_data.grid) {

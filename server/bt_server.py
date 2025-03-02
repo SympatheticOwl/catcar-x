@@ -201,7 +201,39 @@ class BTServer:
                         print("Warning: Missing plot_image in scan result")
 
                     # Return the result with NumPy handling
-                    return json.dumps(result, default=numpy_json_encoder)
+                    result_json = json.dumps(result, default=numpy_json_encoder)
+
+                    # If result is large, chunk it (e.g., 4KB chunks)
+                    if len(result_json) > 4096:
+                        # Send a header with total size and command ID
+                        header = json.dumps({
+                            "type": "chunked_start",
+                            "command_id": params.get("command_id"),
+                            "total_size": len(result_json),
+                            "chunks": (len(result_json) + 4095) // 4096
+                        })
+                        self.server.send(header)
+
+                        # Send chunks with sequential IDs
+                        for i in range(0, len(result_json), 4096):
+                            chunk = json.dumps({
+                                "type": "chunk",
+                                "chunk_id": i // 4096,
+                                "command_id": params.get("command_id"),
+                                "data": result_json[i:i + 4096]
+                            })
+                            self.server.send(chunk)
+                            time.sleep(0.1)  # Give time for transmission
+
+                        # Send completion marker
+                        footer = json.dumps({
+                            "type": "chunked_end",
+                            "command_id": params.get("command_id")
+                        })
+                        self.server.send(footer)
+                        return None  # Don't return anything, we sent the data in chunks
+
+                    return result_json
                 except asyncio.TimeoutError:
                     print("Scan operation timed out")
                     return json.dumps({
@@ -293,50 +325,6 @@ class BTServer:
                     "status": "success",
                     "message": "Stopped movement"
                 })
-
-            elif cmd == "see":
-                # Create vision task in the event loop
-                self.manager.loop.call_soon_threadsafe(
-                    lambda: setattr(
-                        self.manager.commands.state,
-                        'vision_task',
-                        self.manager.loop.create_task(self.manager.commands.vision.capture_and_detect())
-                    )
-                )
-
-                # Give a short delay to allow the task to start
-                time.sleep(0.1)
-
-                objects = self.manager.commands.get_objects()
-
-                # Start video streaming in a separate thread
-                self.video_active = True
-                self.video_thread = threading.Thread(target=self.stream_video)
-                self.video_thread.daemon = True
-                self.video_thread.start()
-
-                return json.dumps({
-                    "status": "success",
-                    "message": "Vision system started",
-                    "objects": objects,
-                })
-
-            elif cmd == "blind":
-                # Stop vision task using the event loop
-                self.manager.loop.call_soon_threadsafe(
-                    lambda: self.manager.commands.state.vision_task.cancel()
-                    if self.manager.commands.state.vision_task else None
-                )
-
-                # This is a synchronous call
-                self.manager.commands.stop_vision()
-                self.video_active = False
-
-                return json.dumps({
-                    "status": "success",
-                    "message": "Vision system stopped"
-                })
-
             else:
                 return json.dumps({
                     "status": "error",

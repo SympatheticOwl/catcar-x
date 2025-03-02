@@ -22,10 +22,9 @@
 
 <div class="button-row">
     <button id="scanEnv" disabled>Scan Environment</button>
-</div>
-
-<div class="button-row">
-    <button id="toggleVideo" disabled>Start Video Feed</button>
+    <span id="scanProgress" style="display: none; margin-left: 10px;">
+        <span class="spinner"></span> Scanning... This may take up to 30 seconds
+    </span>
 </div>
 
 <div id="videoContainer">
@@ -47,9 +46,9 @@
     const connectButton = document.getElementById('connectButton');
     const disconnectButton = document.getElementById('disconnectButton');
     const connectionStatus = document.getElementById('connectionStatus');
+    const scanProgress = document.getElementById('scanProgress');
 
     let isConnected = false;
-    let isVideoActive = false;
     let videoInterval;
 
     // Connect to the Raspberry Pi via Bluetooth
@@ -79,7 +78,7 @@
                 status.textContent = `Status: ${data.message}`;
 
                 // Enable control buttons
-                document.querySelectorAll('.controls button, #scanEnv, #toggleVideo').forEach(button => {
+                document.querySelectorAll('.controls button, #scanEnv').forEach(button => {
                     button.disabled = false;
                 });
 
@@ -111,17 +110,9 @@
             status.textContent = `Status: ${data.message}`;
 
             // Disable control buttons
-            document.querySelectorAll('.controls button, #scanEnv, #toggleVideo').forEach(button => {
+            document.querySelectorAll('.controls button, #scanEnv').forEach(button => {
                 button.disabled = true;
             });
-
-            // Stop video if active
-            if (isVideoActive) {
-                clearInterval(videoInterval);
-                videoFeed.style.display = 'none';
-                document.getElementById('toggleVideo').textContent = 'Start Video Feed';
-                isVideoActive = false;
-            }
 
             connectButton.disabled = false;
             disconnectButton.disabled = true;
@@ -130,7 +121,7 @@
         }
     });
 
-    // Helper function for making API calls
+    // Helper function for making API calls with timeout
     async function sendCommand(cmd, options = {}) {
         if (!isConnected) {
             status.textContent = 'Status: Not connected to Raspberry Pi';
@@ -139,14 +130,29 @@
 
         try {
             const queryString = options.angle ? `?angle=${options.angle}` : '';
+            console.log(`Sending command: ${cmd}${queryString}`);
+
+            // Use AbortController for timeout control
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), options.timeout || 60000); // Default 60s timeout
+
             const response = await fetch(`${API_URL}/command/${cmd}${queryString}`, {
-                method: 'POST'
+                method: 'POST',
+                signal: controller.signal
             });
+
+            clearTimeout(timeoutId);
+
             const data = await response.json();
             status.textContent = `Status: ${data.message || data.status}`;
             return data;
         } catch (error) {
-            status.textContent = `Error: ${error.message}`;
+            if (error.name === 'AbortError') {
+                console.log('Request timed out');
+                status.textContent = `Error: Request timed out. The server may still be processing the command.`;
+            } else {
+                status.textContent = `Error: ${error.message}`;
+            }
             throw error;
         }
     }
@@ -208,35 +214,6 @@
     setupButton('left', 'left', -30);
     setupButton('right', 'right', 30);
 
-    // Video feed handling
-    document.getElementById('toggleVideo').addEventListener('click', async function () {
-        if (!isConnected) {
-            status.textContent = 'Status: Not connected to Raspberry Pi';
-            return;
-        }
-
-        if (!isVideoActive) {
-            // Start video
-            const response = await sendCommand('see');
-            if (response && response.status === 'success') {
-                videoFeed.style.display = 'block';
-                this.textContent = 'Stop Video Feed';
-
-                // Set video feed source directly to the streaming endpoint
-                const timestamp = new Date().getTime();
-                videoFeed.src = `${API_URL}/video_feed?t=${timestamp}`;
-
-                isVideoActive = true;
-            }
-        } else {
-            // Stop video
-            await sendCommand('blind');
-            videoFeed.style.display = 'none';
-            this.textContent = 'Start Video Feed';
-            isVideoActive = false;
-        }
-    });
-
     // Scan environment button
     document.getElementById('scanEnv').addEventListener('click', async function () {
         if (!isConnected) {
@@ -247,15 +224,24 @@
         try {
             // Show loading state
             this.disabled = true;
-            status.textContent = 'Status: Scanning environment...';
+            scanProgress.style.display = 'inline-block';
+            status.textContent = 'Status: Scanning environment... (this may take up to 30 seconds)';
 
-            // Get the scan data
-            const response = await sendCommand('scan');
+            // Clear previous visualization
+            const mapImg = document.getElementById('mapVisualization');
+            mapImg.style.display = 'none';
+            const asciiMap = document.getElementById('asciiMap');
+            asciiMap.style.display = 'none';
+
+            // Get the scan data with extended timeout
+            const response = await sendCommand('scan', { timeout: 90000 }); // 90 second timeout
             console.log("Scan response:", response); // Debug log
+
+            // Hide progress indicator
+            scanProgress.style.display = 'none';
 
             if (response && response.status === 'success') {
                 // Display the matplotlib visualization
-                const mapImg = document.getElementById('mapVisualization');
                 if (response.data && response.data.plot_image) {
                     mapImg.src = `data:image/png;base64,${response.data.plot_image}`;
                     mapImg.style.display = 'block';
@@ -265,7 +251,6 @@
                 }
 
                 // Display the ASCII map
-                const asciiMap = document.getElementById('asciiMap');
                 if (response.data && response.data.grid_data && response.data.grid_data.grid) {
                     // Create ASCII representation
                     const grid = response.data.grid_data.grid;
@@ -286,6 +271,7 @@
                 console.error("Scan failed:", response);
             }
         } catch (error) {
+            scanProgress.style.display = 'none';
             status.textContent = `Error: ${error.message}`;
             console.error("Scan error:", error);
         } finally {
@@ -345,11 +331,6 @@
                 // Stop any movement
                 await sendCommand('stop');
 
-                // Stop video if active
-                if (isVideoActive) {
-                    await sendCommand('blind');
-                }
-
                 // Disconnect
                 await fetch(`${API_URL}/disconnect`, {
                     method: 'POST'
@@ -369,15 +350,19 @@
             transform: scale(0.95);
         }
 
-        /* Improve video container */
-        #videoFeed {
-            background-color: #f0f0f0;
-            min-height: 200px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #666;
-            font-style: italic;
+        /* Spinner for scan progress */
+        .spinner {
+            display: inline-block;
+            width: 15px;
+            height: 15px;
+            border: 2px solid rgba(0, 0, 0, 0.1);
+            border-top-color: #4a90e2;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
     </style>
     `);
@@ -385,9 +370,18 @@
     // Add periodic status check for connection monitoring
     function checkStatus() {
         if (isConnected) {
-            fetch(`${API_URL}/status`)
+            // Use AbortController to prevent hanging status checks
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout for status checks
+
+            fetch(`${API_URL}/status`, {
+                signal: controller.signal
+            })
                 .then(response => response.json())
                 .then(data => {
+                    // Reset fail count on successful response
+                    statusFailCount = 0;
+
                     // Update status indicators if needed based on response
                     if (data.emergency_stop) {
                         status.textContent = 'Status: Emergency stop active';
@@ -397,17 +391,26 @@
                     }
                 })
                 .catch(error => {
+                    // Don't count abort errors (timeouts) as connection failures
+                    // during scan operations - the server might just be busy
+                    if (error.name === 'AbortError' && scanProgress.style.display === 'inline-block') {
+                        console.log('Status check timed out during scanning operation - ignoring');
+                        return;
+                    }
+
                     console.error('Status check failed:', error);
                     // If status check fails multiple times, consider disconnected
                     if (isConnected) {
                         statusFailCount++;
+                        console.log(`Status check failure count: ${statusFailCount}/3`);
+
                         if (statusFailCount > 3) {
                             connectionStatus.textContent = 'Status: Connection lost';
                             connectionStatus.className = 'disconnected';
                             isConnected = false;
 
                             // Disable control buttons
-                            document.querySelectorAll('.controls button, #scanEnv, #toggleVideo').forEach(button => {
+                            document.querySelectorAll('.controls button, #scanEnv').forEach(button => {
                                 button.disabled = true;
                             });
 
@@ -415,6 +418,9 @@
                             disconnectButton.disabled = true;
                         }
                     }
+                })
+                .finally(() => {
+                    clearTimeout(timeoutId);
                 });
         }
     }

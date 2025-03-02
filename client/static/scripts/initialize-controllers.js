@@ -75,7 +75,7 @@ function setupButtonHandlers(container, isBluetooth) {
     const apiUrl = isBluetooth ? window.location.origin : 'http://10.0.0.219:8000';
     console.log(`Using API URL for ${isBluetooth ? 'Bluetooth' : 'WiFi'} controller: ${apiUrl}`);
 
-    // Helper function for making API calls
+    // Helper function for making API calls with timeout support
     async function sendCommand(cmd, options = {}) {
         try {
             console.log(`Sending ${cmd} command to ${apiUrl}`);
@@ -83,6 +83,12 @@ function setupButtonHandlers(container, isBluetooth) {
             // Handle different API formats between Bluetooth and WiFi controllers
             let url;
             let fetchOptions = { method: 'POST' };
+
+            // Add AbortController for timeout handling
+            const controller = new AbortController();
+            const timeoutMs = options.timeout || (cmd === 'scan' ? 90000 : 30000); // Use longer timeout for scan
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+            fetchOptions.signal = controller.signal;
 
             if (isBluetooth) {
                 // Bluetooth controller uses query params for angles
@@ -102,6 +108,8 @@ function setupButtonHandlers(container, isBluetooth) {
             }
 
             const response = await fetch(url, fetchOptions);
+            clearTimeout(timeoutId);
+
             const data = await response.json();
 
             const statusEl = container.querySelector('#status');
@@ -111,10 +119,18 @@ function setupButtonHandlers(container, isBluetooth) {
 
             return data;
         } catch (error) {
-            console.error(`Error sending command ${cmd} to ${apiUrl}:`, error);
-            const statusEl = container.querySelector('#status');
-            if (statusEl) {
-                statusEl.textContent = `Error: ${error.message}`;
+            if (error.name === 'AbortError') {
+                console.log(`Request timed out for command: ${cmd}`);
+                const statusEl = container.querySelector('#status');
+                if (statusEl) {
+                    statusEl.textContent = `Error: Request timed out. The server may still be processing the command.`;
+                }
+            } else {
+                console.error(`Error sending command ${cmd} to ${apiUrl}:`, error);
+                const statusEl = container.querySelector('#status');
+                if (statusEl) {
+                    statusEl.textContent = `Error: ${error.message}`;
+                }
             }
             throw error;
         }
@@ -189,27 +205,72 @@ function setupButtonHandlers(container, isBluetooth) {
         const newScanBtn = scanEnvBtn.cloneNode(true);
         scanEnvBtn.parentNode.replaceChild(newScanBtn, scanEnvBtn);
 
+        // Find or create the scan progress indicator
+        let scanProgress = container.querySelector('#scanProgress');
+        if (!scanProgress) {
+            scanProgress = document.createElement('span');
+            scanProgress.id = 'scanProgress';
+            scanProgress.style.display = 'none';
+            scanProgress.style.marginLeft = '10px';
+            scanProgress.innerHTML = '<span class="spinner"></span> Scanning... This may take up to 30 seconds';
+            newScanBtn.parentNode.appendChild(scanProgress);
+
+            // Add spinner style if needed
+            if (!document.querySelector('style#spinnerStyle')) {
+                const style = document.createElement('style');
+                style.id = 'spinnerStyle';
+                style.textContent = `
+                    .spinner {
+                        display: inline-block;
+                        width: 15px;
+                        height: 15px;
+                        border: 2px solid rgba(0, 0, 0, 0.1);
+                        border-top-color: #4a90e2;
+                        border-radius: 50%;
+                        animation: spin 1s linear infinite;
+                    }
+                    
+                    @keyframes spin {
+                        to { transform: rotate(360deg); }
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+        }
+
         newScanBtn.addEventListener('click', async function() {
             try {
                 this.disabled = true;
+                scanProgress.style.display = 'inline-block';
+
                 const statusEl = container.querySelector('#status');
                 if (statusEl) {
-                    statusEl.textContent = 'Status: Scanning environment...';
+                    statusEl.textContent = 'Status: Scanning environment... (this may take up to 30 seconds)';
                 }
 
-                // Get the scan data
-                const response = await sendCommand('scan');
+                // Clear previous visualization
+                const mapImg = container.querySelector('#mapVisualization');
+                if (mapImg) mapImg.style.display = 'none';
 
-                // Handle scan response and update UI
+                const asciiMap = container.querySelector('#asciiMap');
+                if (asciiMap) asciiMap.style.display = 'none';
+
+                // Get the scan data with long timeout
+                const response = await sendCommand('scan', { timeout: 90000 }); // 90 second timeout
+
+                // Hide progress indicator
+                scanProgress.style.display = 'none';
+
                 if (response && response.status === 'success') {
-                    const mapImg = container.querySelector('#mapVisualization');
+                    // Display the matplotlib visualization
                     if (mapImg && response.data && response.data.plot_image) {
                         mapImg.src = `data:image/png;base64,${response.data.plot_image}`;
                         mapImg.style.display = 'block';
                     }
 
-                    const asciiMap = container.querySelector('#asciiMap');
+                    // Display the ASCII map
                     if (asciiMap && response.data && response.data.grid_data && response.data.grid_data.grid) {
+                        // Create ASCII representation
                         const grid = response.data.grid_data.grid;
                         const asciiRepresentation = grid.map(row =>
                             row.map(cell => cell === 2 ? 'C' : cell === 1 ? '#' : '.').join('')
@@ -224,6 +285,7 @@ function setupButtonHandlers(container, isBluetooth) {
                 }
             } catch (error) {
                 console.error("Scan error:", error);
+                scanProgress.style.display = 'none';
             } finally {
                 this.disabled = false;
             }
