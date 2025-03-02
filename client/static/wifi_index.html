@@ -4,39 +4,39 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PicarX Controller</title>
-    <link rel="stylesheet" type="text/css" href="./stacks.min.css">
-    <script>
-        (function () {
-            var forceSetting = localStorage.getItem("forceDarkModeOn");
-            var forceHighContrast = localStorage.getItem("forceHighContrastModeOn");
-            var browserPrefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-            var darkModeEnabled = forceSetting === "true" || (!forceSetting && browserPrefersDark);
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@stackoverflow/stacks/dist/css/stacks.min.css">
+<!--    <script>-->
+<!--        (function () {-->
+<!--            var forceSetting = localStorage.getItem("forceDarkModeOn");-->
+<!--            var forceHighContrast = localStorage.getItem("forceHighContrastModeOn");-->
+<!--            var browserPrefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;-->
+<!--            var darkModeEnabled = forceSetting === "true" || (!forceSetting && browserPrefersDark);-->
 
-            if (browserPrefersDark) {
-                document.body.classList.toggle("theme-system", darkModeEnabled);
-                document.body.classList.toggle("theme-dark", false);
-            }
-            else {
-                document.body.classList.toggle("theme-system", true);
-                document.body.classList.toggle("theme-dark", darkModeEnabled);
-            }
+<!--            if (browserPrefersDark) {-->
+<!--                document.body.classList.toggle("theme-system", darkModeEnabled);-->
+<!--                document.body.classList.toggle("theme-dark", false);-->
+<!--            }-->
+<!--            else {-->
+<!--                document.body.classList.toggle("theme-system", true);-->
+<!--                document.body.classList.toggle("theme-dark", darkModeEnabled);-->
+<!--            }-->
 
-            var customTheme = localStorage.getItem("customTheme");
+<!--            var customTheme = localStorage.getItem("customTheme");-->
 
-            if (customTheme === "true") {
-                document.body.classList.add("theme-custom", "themed");
-            } else {
-                document.body.classList.remove("theme-custom", "themed");
-            }
+<!--            if (customTheme === "true") {-->
+<!--                document.body.classList.add("theme-custom", "themed");-->
+<!--            } else {-->
+<!--                document.body.classList.remove("theme-custom", "themed");-->
+<!--            }-->
 
-            if (forceHighContrast === "true") {
-                document.body.classList.add("theme-highcontrast");
-            } else {
-                document.body.classList.remove("theme-highcontrast");
-            }
-        }());
+<!--            if (forceHighContrast === "true") {-->
+<!--                document.body.classList.add("theme-highcontrast");-->
+<!--            } else {-->
+<!--                document.body.classList.remove("theme-highcontrast");-->
+<!--            }-->
+<!--        }());-->
 
-    </script>
+<!--    </script>-->
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -175,6 +175,7 @@
 
     // Handle button press and release
     function setupButton(id, pressCommand, angle = null) {
+        console.log(id, pressCommand, angle)
         const button = document.getElementById(id);
 
         // Touch events

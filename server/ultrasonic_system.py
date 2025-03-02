@@ -125,6 +125,7 @@ class UltrasonicSystem:
             # Check for emergency stop conditions
             if (self.__state.current_distance < self.__state.min_distance and
                     self.__state.is_moving and
+                    not self.__state.is_backing_up and
                     not self.__state.emergency_stop_flag):
                 print(f"Emergency stop! Object detected at {self.__state.current_distance:.1f}cm")
                 await self.emergency_stop()

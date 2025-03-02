@@ -4,7 +4,7 @@ import json
 import time
 import threading
 import queue
-from flask import Flask, jsonify, Response, request, send_from_directory
+from flask import Flask, jsonify, Response, request, send_from_directory, make_response
 from bluedot.btcomm import BluetoothClient
 
 app = Flask(__name__, static_folder='static')
@@ -150,15 +150,76 @@ class PicarXBridge:
 bridge = PicarXBridge()
 
 
+@app.route('/')
+def index():
+    """Serve the composite HTML page that includes both controllers"""
+    return send_from_directory('static', 'composite_index.html')
+
+
 @app.route('/bt')
 def bt_index():
-    """Serve the main HTML page"""
+    """Serve the Bluetooth HTML page"""
+    if request.headers.get('HX-Request'):
+        # For HTMX requests, return just the content without layout
+        with open(os.path.join(app.static_folder, 'bt_index.html'), 'r') as f:
+            content = f.read()
+            # Extract the body content for HTMX
+            import re
+            body_match = re.search(r'<body[^>]*>([\s\S]*?)<\/body>', content, re.IGNORECASE)
+            if body_match:
+                body_content = body_match.group(1)
+
+                # Make modifications to avoid ID conflicts
+                # Add a prefix to Bluetooth-specific IDs to avoid conflicts with WiFi controller
+                body_content = body_content.replace('id="status"', 'id="bt-status" class="status"')
+
+                # Add a div wrapper to ensure proper context for scripts
+                response = make_response(
+                    f'<div id="bt-controller-content" class="bt-controller-content">{body_content}</div>')
+                # Tell HTMX to trigger JavaScript initialization
+                response.headers['HX-Trigger'] = 'bt-controller-loaded'
+                return response
+    # For regular requests, return the full page
     return send_from_directory('static', 'bt_index.html')
+
 
 @app.route('/wifi')
 def wifi_index():
-    """Serve the main HTML page"""
+    """Serve the WiFi HTML page"""
+    if request.headers.get('HX-Request'):
+        # For HTMX requests, return just the content without layout
+        with open(os.path.join(app.static_folder, 'wifi_index.html'), 'r') as f:
+            content = f.read()
+            # Extract the body content for HTMX
+            import re
+            body_match = re.search(r'<body[^>]*>([\s\S]*?)<\/body>', content, re.IGNORECASE)
+            if body_match:
+                body_content = body_match.group(1)
+
+                # Make modifications to avoid ID conflicts
+                # Add a prefix to WiFi-specific IDs to avoid conflicts with Bluetooth controller
+                body_content = body_content.replace('id="status"', 'id="wifi-status" class="status"')
+
+                # Add a div wrapper to ensure proper context for scripts
+                response = make_response(
+                    f'<div id="wifi-controller-content" class="wifi-controller-content">{body_content}</div>')
+                # Tell HTMX to trigger JavaScript initialization
+                response.headers['HX-Trigger'] = 'wifi-controller-loaded'
+                return response
+    # For regular requests, return the full page
     return send_from_directory('static', 'wifi_index.html')
+
+
+# Add this route to serve our initialization script
+@app.route('/scripts/initialize-controllers.js')
+def initialize_controllers():
+    """Serve the script to initialize the controllers after HTMX load"""
+    return send_from_directory('static/js', 'initialize-controllers.js')
+
+@app.route('/stacks.min.css')
+def serve_stacks_css():
+    """Serve the Stacks CSS file if locally hosted"""
+    return send_from_directory('static/css', 'stacks.min.css')
 
 
 @app.route('/connect', methods=['POST'])

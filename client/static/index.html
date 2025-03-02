@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PicarX Dual Controller</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@stackoverflow/stacks/dist/css/stacks.min.css">
+    <!-- HTMX Library -->
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <!-- Add reference to our initialization script -->
+    <script src="/js/initialize-controllers.js" defer></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .controllers-container {
+            display: flex;
+            flex-direction: row;
+            gap: 20px;
+        }
+
+        @media (max-width: 1200px) {
+            .controllers-container {
+                flex-direction: column;
+            }
+        }
+
+        .controller-panel {
+            flex: 1;
+            background-color: #fff;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            min-height: 400px;
+            overflow: auto;
+            max-height: 800px;
+        }
+
+        .controller-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .controller-title {
+            font-size: 1.5rem;
+            margin: 0;
+        }
+
+        .tab-buttons {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            justify-content: center;
+        }
+
+        .tab-button {
+            padding: 10px 20px;
+            background-color: #f0f0f0;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background-color 0.2s;
+        }
+
+        .tab-button.active {
+            background-color: #4a90e2;
+            color: white;
+        }
+
+        .tab-button:hover:not(.active) {
+            background-color: #e0e0e0;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            font-style: italic;
+            color: #666;
+        }
+
+        /* Ensure all content is contained within its panel */
+        .controller-panel * {
+            max-width: 100%;
+        }
+
+        /* Fix any conflicting styles from the imported views */
+        .controller-panel h1 {
+            font-size: 1.5rem;
+            margin-top: 0;
+        }
+
+        /* Ensure each controller's content is properly scoped */
+        .controller-content {
+            position: relative;
+        }
+
+        /* Prevent duplicate IDs from causing issues */
+        #bluetooth-controller #status,
+        #wifi-controller #status {
+            /* Override any conflicting styles */
+            margin: 15px 0;
+            border: 1px solid #ddd;
+            background-color: #f9f9f9;
+            padding: 8px 12px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>PicarX Dual Controller Interface</h1>
+            <p>Control your PicarX robot using either Bluetooth or WiFi connection</p>
+
+            <div class="tab-buttons">
+                <button class="tab-button active" id="dual-view-btn" onclick="switchTab('dual')">Dual View</button>
+                <button class="tab-button" id="bluetooth-only-btn" onclick="switchTab('bluetooth')">Bluetooth Only</button>
+                <button class="tab-button" id="wifi-only-btn" onclick="switchTab('wifi')">WiFi Only</button>
+            </div>
+        </div>
+
+        <div class="controllers-container" id="dual-view">
+            <!-- Bluetooth Controller Panel -->
+            <div class="controller-panel" id="bluetooth-controller">
+                <div class="controller-header">
+                    <h2 class="controller-title">Bluetooth Control</h2>
+                </div>
+                <div class="loading" id="bt-loading">Loading Bluetooth controller...</div>
+                <div id="bt-content" hx-get="/bt" hx-trigger="load" hx-swap="innerHTML" class="controller-content"></div>
+            </div>
+
+            <!-- WiFi Controller Panel -->
+            <div class="controller-panel" id="wifi-controller">
+                <div class="controller-header">
+                    <h2 class="controller-title">WiFi Control</h2>
+                </div>
+                <div class="loading" id="wifi-loading">Loading WiFi controller...</div>
+                <div id="wifi-content" hx-get="/wifi" hx-trigger="load" hx-swap="innerHTML" class="controller-content"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Handle tab switching
+        function switchTab(tab) {
+            const dualView = document.getElementById('dual-view');
+            const btController = document.getElementById('bluetooth-controller');
+            const wifiController = document.getElementById('wifi-controller');
+
+            // Update button active states
+            document.getElementById('dual-view-btn').classList.toggle('active', tab === 'dual');
+            document.getElementById('bluetooth-only-btn').classList.toggle('active', tab === 'bluetooth');
+            document.getElementById('wifi-only-btn').classList.toggle('active', tab === 'wifi');
+
+            // Reset the layout
+            dualView.style.flexDirection = 'row';
+            btController.style.display = 'block';
+            wifiController.style.display = 'block';
+
+            // Apply the selected tab view
+            switch(tab) {
+                case 'bluetooth':
+                    wifiController.style.display = 'none';
+                    break;
+                case 'wifi':
+                    btController.style.display = 'none';
+                    break;
+                case 'dual':
+                    // Default dual view
+                    break;
+            }
+        }
+
+        // Hide loading messages when content loads
+        document.addEventListener('htmx:afterSwap', function(event) {
+            if (event.target.id === 'bt-content') {
+                document.getElementById('bt-loading').style.display = 'none';
+            } else if (event.target.id === 'wifi-content') {
+                document.getElementById('wifi-loading').style.display = 'none';
+            }
+        });
+
+        // Handle window resize for responsive layout
+        function handleResize() {
+            const dualView = document.getElementById('dual-view');
+            if (window.innerWidth < 1200) {
+                dualView.style.flexDirection = 'column';
+            } else {
+                dualView.style.flexDirection = 'row';
+            }
+        }
+
+        // Initialize resize handler
+        window.addEventListener('resize', handleResize);
+        handleResize();
+    </script>
+</body>
+</html>
