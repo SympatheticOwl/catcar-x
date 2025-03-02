@@ -85,23 +85,39 @@ class WorldMap3:
         relative to the robot's current position and heading
 
         Args:
-            angle: Angle in degrees (relative to robot's heading)
+            angle: Angle in degrees (relative to robot's front, where 0 is forward)
             distance: Distance in cm
 
         Returns:
             (x, y): Cartesian coordinates (cm) in world space
         """
-        # Calculate absolute angle in world coordinates
-        absolute_angle = (self.state.heading + angle) % 360
+        # The visualization uses the standard mathematical coordinate system:
+        # - x increases to the right
+        # - y increases upward
+        # - 0° is east (right), 90° is north (up)
+
+        # The sensor angle is measured relative to the robot's front:
+        # - 0° is the direction the robot is facing
+        # - Positive is clockwise (right)
+        # - Negative is counter-clockwise (left)
+
+        # The robot's heading is in the same convention as the world coordinates:
+        # - 0° is east
+        # - 90° is north
+
+        # To convert sensor angle to absolute angle:
+        # 1. Start with robot's heading (direction it's facing)
+        # 2. Adjust by the sensor angle (but flip the sign since sensor + is clockwise)
+        absolute_angle = (self.state.heading - angle) % 360
 
         # Convert to radians
         angle_rad = math.radians(absolute_angle)
 
-        # Calculate offsets
+        # Calculate cartesian coordinates using standard formula
         x_offset = distance * math.cos(angle_rad)
         y_offset = distance * math.sin(angle_rad)
 
-        # Add offsets to robot's current position
+        # Add to robot's position
         world_x = self.state.x + x_offset
         world_y = self.state.y + y_offset
 
