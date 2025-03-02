@@ -1,7 +1,7 @@
 import time
 import threading
 from commands import Commands
-from bt_server import BluetoothServer
+from bt_server import BTServer
 from wifi_server import WifiServer
 from flask import Flask
 
@@ -12,7 +12,7 @@ if __name__ == "__main__":
 
         # Create both servers
         wifi_server = WifiServer(commands)
-        bt_server = BluetoothServer(commands)
+        bt_server = BTServer(commands)
 
         # Start Flask server in a separate thread
         flask_thread = threading.Thread(target=lambda: Flask.run(

@@ -75,14 +75,14 @@ class AsyncCommandManager:
         self.thread.join(timeout=5)  # Add timeout to prevent hanging
 
 
-class BluetoothServer:
+class BTServer:
     def __init__(self, commands: Commands):
         print("Initializing Bluetooth server for PicarX...")
         self.manager = AsyncCommandManager(commands)
         self.server = BlueDotServer(self.data_received, when_client_connects=self.client_connected,
-                                      when_client_disconnects=self.client_disconnected,
-                                      port=2,
-                                      auto_start=False)
+                                    when_client_disconnects=self.client_disconnected,
+                                    port=2,
+                                    auto_start=False)
         self.video_active = False
         self.video_thread = None
 
@@ -499,3 +499,26 @@ class BluetoothServer:
             self.video_thread.join(timeout=5)
         self.manager.cleanup()
         self.server.stop()
+
+
+# This is used if this file is run directly
+if __name__ == "__main__":
+    try:
+        # Create a Commands instance
+        commands = Commands()
+
+        # Create and start the server
+        server = BTServer(commands)
+        print("Server running. Press Ctrl+C to exit.")
+
+        # Keep the main thread alive
+        while True:
+            time.sleep(1)
+
+    except KeyboardInterrupt:
+        print("\nShutting down server...")
+    except Exception as e:
+        print(f"Error: {e}")
+    finally:
+        if 'server' in locals():
+            server.cleanup()
