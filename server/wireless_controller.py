@@ -1,7 +1,7 @@
 import time
 import threading
 
-from car.commands import Commands
+from ..car.commands import Commands
 from bt_server import BTServer
 from wifi_server import WifiServer
 
