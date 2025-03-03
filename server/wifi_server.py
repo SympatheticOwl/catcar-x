@@ -9,7 +9,7 @@ from flask import Flask, jsonify, Response, request
 from typing import Dict, Optional
 import asyncio
 import threading
-from car.commands import Commands
+from catcar_x.car.commands import Commands
 
 
 class AsyncCommandManager:
