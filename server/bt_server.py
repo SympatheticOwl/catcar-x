@@ -114,6 +114,10 @@ class BTServer:
     def data_received(self, data):
         """Handle incoming Bluetooth commands"""
         try:
+            # Convert data to string if it's bytes
+            if isinstance(data, bytes):
+                data = data.decode('utf-8')
+
             # Parse the JSON data
             request = json.loads(data)
             endpoint = request.get('endpoint', '')
@@ -135,7 +139,7 @@ class BTServer:
                 response = self.handle_visualization()
             elif endpoint == 'telemetry':
                 # Pass the entire request to include command_id
-                response = self.handle_telemetry(cmd, command_id)
+                response = self.handle_telemetry(cmd, request)
             else:
                 response = json.dumps({
                     "status": "error",
@@ -156,6 +160,12 @@ class BTServer:
 
             return response
         except json.JSONDecodeError:
+            if isinstance(data, bytes):
+                data_preview = data[:100].hex()
+            else:
+                data_preview = data[:100]
+
+            print(f"Invalid JSON data: {data_preview}")
             return json.dumps({
                 "status": "error",
                 "message": "Invalid JSON data"
@@ -192,6 +202,10 @@ class BTServer:
             "chunks": chunks
         })
         print(f"Sending chunked response start: {start_marker}")
+        self.server.send(start_marker)
+
+        # Add a small delay between chunks to avoid overwhelming the Bluetooth connection
+        time.sleep(0.1)
 
         # Send the actual data in chunks
         for i in range(chunks):
@@ -206,6 +220,10 @@ class BTServer:
                 "data": chunk_data
             })
             print(f"Sending chunk {i + 1}/{chunks}, size: {len(chunk_data)}")
+            self.server.send(chunk)
+
+            # Small delay between chunks
+            time.sleep(0.05)
 
         # Send end marker
         end_marker = json.dumps({
@@ -213,6 +231,7 @@ class BTServer:
             "command_id": command_id
         })
         print(f"Sending chunked response end: {end_marker}")
+        self.server.send(end_marker)
 
         return True
 

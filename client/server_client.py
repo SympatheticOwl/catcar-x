@@ -437,12 +437,20 @@ class PicarXBridge:
             with self.command_lock:
                 self.pending_commands[cmd_id] = cmd_queue
 
-            # Send the command - CONVERT STRING TO BYTES HERE
+            # Send the command
             command_json = json.dumps(command)
             print(f"Sending command: {command_json}")
 
-            # Encode the string to bytes before sending
-            self.client.send(command_json.encode('utf-8'))
+            # Check if client is configured for binary or string mode
+            # If client is using binary mode (encoding=None), send bytes directly
+            # Otherwise, it's already set to use a string encoding (like utf-8)
+            if hasattr(self.client, '_encoding') and self.client._encoding is None:
+                # Binary mode - send UTF-8 encoded bytes
+                self.client.send(command_json.encode('utf-8'))
+            else:
+                # String mode - send the string directly
+                self.client.send(command_json)
+
             print(f"Command sent with ID: {cmd_id}")
 
             # For movement commands, don't wait for response
@@ -456,6 +464,10 @@ class PicarXBridge:
 
             # Wait for response with timeout
             try:
+                # Default timeout if none provided
+                if timeout is None:
+                    timeout = 10  # 10 seconds default timeout
+
                 # Wait for response on this command's queue
                 response = cmd_queue.get(timeout=timeout)
                 print(f"Received response for command {cmd_id}")
