@@ -1,6 +1,15 @@
+import os
+import sys
 import time
 import threading
-from ..car.commands import Commands
+
+# Get the absolute path to the project root directory (catcar-x)
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Add the project root to Python path
+sys.path.append(project_root)
+
+from car.commands import Commands
 from bt_server import BTServer
 from wifi_server import WifiServer
 
