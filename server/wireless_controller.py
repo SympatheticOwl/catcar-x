@@ -3,7 +3,7 @@ import sys
 import time
 import threading
 
-from catcar_x.car.commands import Commands
+from car.commands import Commands
 from bt_server import BTServer
 from wifi_server import WifiServer
 
