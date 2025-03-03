@@ -79,6 +79,9 @@ class BTServer:
     def __init__(self, commands: Commands):
         print("Initializing Bluetooth server for PicarX...")
         self.manager = AsyncCommandManager(commands)
+        self.connected_clients = {}  # Store client addresses and sockets
+        self.client_lock = threading.Lock()  # Lock for thread-safe client access
+
         self.server = BlueDotServer(self.data_received, when_client_connects=self.client_connected,
                                     when_client_disconnects=self.client_disconnected,
                                     port=2,
@@ -111,9 +114,19 @@ class BTServer:
         if self.manager.commands:
             self.manager.commands.cancel_movement()
 
-    def data_received(self, data):
+    def data_received(self, data, client_address=None):
         """Handle incoming Bluetooth commands"""
+        print(f"Received data from client {client_address}: {data[:100]}...")
         try:
+            # Store the client address if provided
+            if client_address:
+                with self.client_lock:
+                    self.connected_clients[client_address] = True
+                    self.latest_client = client_address
+                print(f"Received data from client: {client_address}")
+            else:
+                print("Received data from unknown client")
+
             # Convert data to string if it's bytes
             if isinstance(data, bytes):
                 data = data.decode('utf-8')
@@ -140,6 +153,14 @@ class BTServer:
             elif endpoint == 'telemetry':
                 # Pass the entire request to include command_id
                 response = self.handle_telemetry(cmd, request)
+            elif endpoint == 'ping':
+                # Handle ping command for connection testing
+                print(f"Received ping from client")
+                response = json.dumps({
+                    "status": "success",
+                    "message": "pong",
+                    "command_id": command_id
+                })
             else:
                 response = json.dumps({
                     "status": "error",
@@ -158,37 +179,87 @@ class BTServer:
                     # Not JSON, leave as is
                     pass
 
-            return response
-        except json.JSONDecodeError:
-            if isinstance(data, bytes):
-                data_preview = data[:100].hex()
-            else:
-                data_preview = data[:100]
+            # Use the new send_response method
+            sent = self.send_response(response, client_address)
+            if not sent:
+                print("Warning: Failed to send response")
 
-            print(f"Invalid JSON data: {data_preview}")
-            return json.dumps({
+            return None  # Don't return response directly as we're manually sending it
+        except json.JSONDecodeError:
+            error_response = json.dumps({
                 "status": "error",
                 "message": "Invalid JSON data"
             })
+            self.send_response(error_response, client_address)
+            return None
         except Exception as e:
             import traceback
             traceback.print_exc()
-            return json.dumps({
+            error_response = json.dumps({
                 "status": "error",
                 "message": str(e)
             })
+            self.send_response(error_response, client_address)
+            return None
 
-    def send_chunked_response(self, data, command_id=None, chunk_size=1024):
+    def send_response(self, response, client_address=None):
+        """
+        Send a response to a client
+
+        Args:
+            response (str): The response to send
+            client_address (str, optional): The client address to send to
+        """
+        try:
+            # If no specific client address provided, use latest client
+            if not client_address:
+                with self.client_lock:
+                    if hasattr(self, 'latest_client') and self.latest_client:
+                        client_address = self.latest_client
+
+            # Log what we're sending
+            print(f"Sending response to client {client_address}: {response[:100]}...")
+
+            # If we're using the BlueDot library's send method:
+            self.server.send(response, client_address)
+
+            # Alternative direct socket approach if needed:
+            """
+            if hasattr(self.server, 'clients') and client_address in self.server.clients:
+                client_socket = self.server.clients[client_address]
+                if client_socket:
+                    # Ensure response is encoded as bytes if needed
+                    if isinstance(response, str):
+                        response = response.encode('utf-8')
+                    client_socket.send(response)
+                    return True
+            """
+
+            return True
+        except Exception as e:
+            print(f"Error sending response: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def send_chunked_response(self, data, command_id=None, client_address=None, chunk_size=1024):
         """
         Send large responses in chunks to avoid Bluetooth transmission issues
 
         Args:
             data (str): JSON string to be sent
             command_id (str, optional): Command ID to track the response
+            client_address (str, optional): The client address to send to
             chunk_size (int, optional): Size of each chunk
         """
         if not command_id:
             command_id = "server_" + str(int(time.time()))
+
+        # Use the latest client address if none provided
+        if not client_address:
+            with self.client_lock:
+                if hasattr(self, 'latest_client') and self.latest_client:
+                    client_address = self.latest_client
 
         # Calculate number of chunks
         total_size = len(data)
@@ -202,7 +273,7 @@ class BTServer:
             "chunks": chunks
         })
         print(f"Sending chunked response start: {start_marker}")
-        self.server.send(start_marker)
+        self.send_response(start_marker, client_address)
 
         # Add a small delay between chunks to avoid overwhelming the Bluetooth connection
         time.sleep(0.1)
@@ -220,7 +291,7 @@ class BTServer:
                 "data": chunk_data
             })
             print(f"Sending chunk {i + 1}/{chunks}, size: {len(chunk_data)}")
-            self.server.send(chunk)
+            self.send_response(chunk, client_address)
 
             # Small delay between chunks
             time.sleep(0.05)
@@ -231,7 +302,7 @@ class BTServer:
             "command_id": command_id
         })
         print(f"Sending chunked response end: {end_marker}")
-        self.server.send(end_marker)
+        self.send_response(end_marker, client_address)
 
         return True
 

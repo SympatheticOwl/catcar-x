@@ -57,12 +57,28 @@ class PicarXBridge:
 
         try:
             print(f"Connecting to Raspberry Pi at {self.bt_address}...")
+
+            # Make sure any previous connection is closed
+            if self.client:
+                try:
+                    self.client.disconnect()
+                except:
+                    pass
+                self.client = None
+
+            # Create a new client with explicit encoding (use utf-8 for string mode)
             self.client = BluetoothClient(self.bt_address,
                                           data_received_callback=self.data_received,
                                           port=2,
                                           auto_connect=True,
-                                          device="hci0",
-                                          encoding='utf-8')
+                                          device="hci0",  # Explicitly set Bluetooth device
+                                          encoding='utf-8')  # Use string mode with UTF-8 encoding
+
+            # Send a ping to establish the connection fully
+            ping_success = self._send_ping()
+            if not ping_success:
+                print("Warning: Initial ping failed, but continuing connection")
+
             self.connected = True
             print("Connected to Raspberry Pi")
             return True
@@ -71,6 +87,27 @@ class PicarXBridge:
             import traceback
             traceback.print_exc()
             self.connected = False
+            return False
+
+    def _send_ping(self):
+        """Send a simple ping command to ensure connection is working"""
+        try:
+            # Simple ping command
+            ping_cmd = json.dumps({
+                "endpoint": "ping",
+                "cmd": "ping",
+                "params": {},
+                "command_id": "ping_" + str(int(time.time()))
+            })
+
+            print("Sending initial ping command...")
+            self.client.send(ping_cmd)
+
+            # Wait a moment for connection to establish
+            time.sleep(0.5)
+            return True
+        except Exception as e:
+            print(f"Error sending ping: {e}")
             return False
 
     def disconnect(self):
