@@ -13,7 +13,7 @@ import asyncio
 from state_handler import State
 
 
-class WorldMap3:
+class WorldMap:
     def __init__(self, state: State, grid_size: int = 100, cell_size: float = 1.0):
         """
         Initialize the world map

@@ -4,7 +4,7 @@ import numpy as np
 import asyncio
 
 from state_handler import State
-from world_map import WorldMap3
+from world_map import WorldMap
 from picarx_wrapper import PicarXWrapper
 
 
@@ -16,7 +16,7 @@ class UltrasonicSystem:
     def __init__(self, state: State, px: PicarXWrapper):
         self.px = px
         self.__state = state
-        self.world_map = WorldMap3(self.__state)
+        self.world_map = WorldMap(self.__state)
 
         # Buffer for recent readings to help with filtering
         self.recent_readings = []
