@@ -6,7 +6,7 @@ import asyncio
 import numpy as np
 import time
 from bluedot.btcomm import BluetoothServer as BlueDotServer
-from commands import Commands  # Assuming commands.py contains the Commands class
+from commands import Commands
 
 
 def numpy_json_encoder(obj):
@@ -132,6 +132,8 @@ class BTServer:
                 response = self.handle_world_state()
             elif endpoint == 'visualization':
                 response = self.handle_visualization()
+            elif endpoint == 'telemetry':
+                response = self.handle_telemetry(cmd)
             else:
                 response = json.dumps({
                     "status": "error",
@@ -235,10 +237,26 @@ class BTServer:
                     "status": "success",
                     "message": "Stopped movement"
                 })
+
+            elif cmd == "set_speed":
+                # Set speed from params
+                speed = float(params.get('speed', 0.5))
+
+                # Clamp speed between 0.1 and 1.0
+                speed = max(0.1, min(1.0, speed))
+
+                # Set speed in state
+                self.manager.commands.state.speed = speed
+
+                return json.dumps({
+                    "status": "success",
+                    "message": f"Speed set to {speed}"
+                })
+
             else:
                 return json.dumps({
                     "status": "error",
-                    "message": f"Unknown command: {cmd}. Available commands: forward, backward, left, right, stop"
+                    "message": f"Unknown command: {cmd}. Available commands: forward, backward, left, right, stop, set_speed"
                 })
 
         except Exception as e:
@@ -259,7 +277,9 @@ class BTServer:
 
         return json.dumps({
             "object_distance": float(self.manager.commands.get_object_distance()),
-            "emergency_stop": bool(self.manager.commands.state.emergency_stop_flag)
+            "emergency_stop": bool(self.manager.commands.state.emergency_stop_flag),
+            "is_moving": bool(self.manager.commands.state.is_moving),
+            "speed": float(self.manager.commands.state.speed)
         }, default=numpy_json_encoder)
 
     def handle_world_state(self):
@@ -299,6 +319,53 @@ class BTServer:
                     "plot_image": visualization_data['visualization']
                 }
             }, default=numpy_json_encoder)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return json.dumps({
+                "status": "error",
+                "message": str(e)
+            })
+
+    def handle_telemetry(self, cmd):
+        """Handle telemetry endpoint requests"""
+        if not self.manager.commands:
+            return json.dumps({
+                "status": "error",
+                "message": "Server still initializing"
+            })
+
+        try:
+            if cmd == "all":
+                # Get all telemetry data
+                telemetry_data = self.manager.commands.get_telemetry()
+                return json.dumps({
+                    "status": "success",
+                    "telemetry": telemetry_data
+                }, default=numpy_json_encoder)
+
+            elif cmd == "battery":
+                # Get just battery information
+                battery_data = self.manager.commands.get_battery_level()
+                return json.dumps({
+                    "status": "success",
+                    "battery": battery_data
+                }, default=numpy_json_encoder)
+
+            elif cmd == "temperature":
+                # Get just CPU temperature
+                temp = self.manager.commands.get_cpu_temperature()
+                return json.dumps({
+                    "status": "success",
+                    "temperature": temp
+                }, default=numpy_json_encoder)
+
+            else:
+                return json.dumps({
+                    "status": "error",
+                    "message": f"Unknown telemetry command: {cmd}. Available commands: all, battery, temperature"
+                })
+
         except Exception as e:
             import traceback
             traceback.print_exc()

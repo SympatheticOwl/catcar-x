@@ -37,6 +37,11 @@ class PicarXBridge:
         self.expecting_large_response = False
         self.last_command_id = None
 
+        # Cache for telemetry data to reduce Bluetooth traffic
+        self.telemetry_cache = {}
+        self.telemetry_cache_time = 0
+        self.telemetry_cache_ttl = 5  # Cache TTL in seconds
+
         # Start connection thread if address is provided
         if self.bt_address:
             self.connect_to_pi()
@@ -253,13 +258,21 @@ class PicarXBridge:
             import traceback
             traceback.print_exc()
 
-    def send_command(self, endpoint, cmd, params=None, timeout=None):
+    def send_command(self, endpoint, cmd, params=None, timeout=None, use_cache=False):
         """Send a command to the Raspberry Pi and wait for response"""
         if not self.connected or not self.client:
             return {"status": "error", "message": "Not connected to Raspberry Pi"}
 
         if params is None:
             params = {}
+
+        # For telemetry endpoints, check if we can use cached data
+        if use_cache and endpoint == 'telemetry':
+            current_time = time.time()
+            if (cmd in self.telemetry_cache and
+                    current_time - self.telemetry_cache_time < self.telemetry_cache_ttl):
+                print(f"Using cached telemetry data for {cmd}")
+                return self.telemetry_cache[cmd]
 
         try:
             # Generate a unique command ID
@@ -308,6 +321,11 @@ class PicarXBridge:
                 with self.command_lock:
                     if cmd_id in self.pending_commands:
                         del self.pending_commands[cmd_id]
+
+                # Cache telemetry responses
+                if endpoint == 'telemetry':
+                    self.telemetry_cache[cmd] = response
+                    self.telemetry_cache_time = time.time()
 
                 return response
             except queue.Empty:
@@ -365,6 +383,18 @@ def wifi_index():
         print(f"Error reading wifi fragment: {e}")
         return "<div>wifi fragment not found</div>"
 
+@app.route('/telemetry-fragment')
+def telemetry_fragment():
+    """Serve the telemetry fragment HTML"""
+    try:
+        with open(os.path.join(app.static_folder, 'telemetry_fragment.html'), 'r') as f:
+            content = f.read()
+            response = make_response(content)
+            return response
+    except Exception as e:
+        print(f"Error reading telemetry fragment: {e}")
+        return "<div>Telemetry fragment not found</div>"
+
 
 # Add this route to serve our initialization script
 @app.route('/scripts/initialize-controllers.js')
@@ -409,12 +439,21 @@ def execute_command(cmd):
     if not bridge.connected:
         return jsonify({"status": "error", "message": "Not connected to Raspberry Pi"}), 400
 
-    # Get angle from query params for turn commands
+    # Get parameters from query string or JSON body
     params = {}
-    if cmd in ['left', 'right']:
-        angle = request.args.get('angle')
-        if angle:
-            params['angle'] = angle
+    if request.is_json:
+        params = request.json
+    else:
+        # Get angle from query params for turn commands
+        if cmd in ['left', 'right']:
+            angle = request.args.get('angle')
+            if angle:
+                params['angle'] = angle
+        # Get speed for speed command
+        elif cmd == 'set_speed':
+            speed = request.args.get('speed')
+            if speed:
+                params['speed'] = float(speed)
 
     # Send the command to the Pi with default timeout
     response = bridge.send_command('command', cmd, params)
@@ -453,74 +492,37 @@ def get_visualization():
     return jsonify(response)
 
 
-def generate_frames():
-    """Generator function for video streaming"""
-    last_frame_time = time.time()
-    no_frame_count = 0
+@app.route('/telemetry', methods=['GET'])
+def get_telemetry():
+    """Get all telemetry data from the PicarX"""
+    if not bridge.connected:
+        return jsonify({"status": "error", "message": "Not connected to Raspberry Pi"}), 400
 
-    while True:
-        if not bridge.connected:
-            yield b'--frame\r\n'
-            yield b'Content-Type: text/plain\r\n\r\n'
-            yield b'Not connected to Raspberry Pi\r\n'
-            time.sleep(1)
-            continue
-
-        try:
-            # Try to get a frame from the queue with a short timeout
-            try:
-                frame_base64 = bridge.frame_queue.get(timeout=0.2)
-                no_frame_count = 0  # Reset counter when we get a frame
-
-                # Decode base64 frame
-                try:
-                    frame_bytes = base64.b64decode(frame_base64)
-
-                    # Send the frame
-                    yield b'--frame\r\n'
-                    yield b'Content-Type: image/jpeg\r\n\r\n'
-                    yield frame_bytes
-                    yield b'\r\n'
-
-                    # Rate limit frame delivery (max 10 fps to client)
-                    current_time = time.time()
-                    if current_time - last_frame_time < 0.1:  # 100ms = 10fps
-                        time.sleep(0.1 - (current_time - last_frame_time))
-                    last_frame_time = time.time()
-
-                except Exception as e:
-                    print(f"Frame decoding error: {e}")
-                    yield b'--frame\r\n'
-                    yield b'Content-Type: text/plain\r\n\r\n'
-                    yield f'Frame error: {str(e)[:50]}...\r\n'.encode('utf-8')
-                    time.sleep(0.5)
-
-            except queue.Empty:
-                # If no frame is available after timeout
-                no_frame_count += 1
-
-                if no_frame_count > 5:  # After ~1 second of no frames
-                    yield b'--frame\r\n'
-                    yield b'Content-Type: text/plain\r\n\r\n'
-                    yield b'Waiting for video...\r\n'
-
-                time.sleep(0.2)
-
-        except Exception as e:
-            print(f"Error in frame generation: {e}")
-            yield b'--frame\r\n'
-            yield b'Content-Type: text/plain\r\n\r\n'
-            yield f'Stream error: {str(e)[:50]}...\r\n'.encode('utf-8')
-            time.sleep(0.5)
+    # Use cached data if available and not expired
+    response = bridge.send_command('telemetry', 'all', use_cache=True, timeout=5)
+    return jsonify(response)
 
 
-@app.route('/video_feed')
-def video_feed():
-    """Video streaming route"""
-    return Response(
-        generate_frames(),
-        mimetype='multipart/x-mixed-replace; boundary=frame'
-    )
+@app.route('/telemetry/battery', methods=['GET'])
+def get_battery():
+    """Get battery information from the PicarX"""
+    if not bridge.connected:
+        return jsonify({"status": "error", "message": "Not connected to Raspberry Pi"}), 400
+
+    # Use cached data if available and not expired
+    response = bridge.send_command('telemetry', 'battery', use_cache=True, timeout=3)
+    return jsonify(response)
+
+
+@app.route('/telemetry/temperature', methods=['GET'])
+def get_temperature():
+    """Get CPU temperature from the PicarX"""
+    if not bridge.connected:
+        return jsonify({"status": "error", "message": "Not connected to Raspberry Pi"}), 400
+
+    # Use cached data if available and not expired
+    response = bridge.send_command('telemetry', 'temperature', use_cache=True, timeout=2)
+    return jsonify(response)
 
 
 # Run the server if executed directly

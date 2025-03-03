@@ -19,6 +19,110 @@
     <button id="right" disabled>→</button>
     <button id="down" disabled>↓</button>
 </div>
+<div class="s-card bs-md m-2">
+    <div class="s-card--header bg-secondary-025 fw-bold">
+        PicarX Telemetry
+    </div>
+    <div class="s-card--content" id="telemetry-data">
+        <div class="d-flex fd-column g8">
+            <!-- CPU Temperature Section -->
+            <div>
+                <h5 class="mb-2">CPU Temperature</h5>
+                <div class="d-flex ai-center g8">
+                    <div class="flex--item">
+                        <span id="cpu-temp">--</span>°C
+                    </div>
+                    <div class="flex--item">
+                        <div class="d-flex ai-center" id="cpu-temp-bar">
+                            <div class="s-progress s-progress__danger" style="width: 100px;">
+                                <div class="s-progress--bar" style="width: 0%;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Battery Section -->
+            <div>
+                <h5 class="mb-2">Battery</h5>
+                <div class="d-flex fd-column g4">
+                    <div class="d-flex ai-center g8">
+                        <div class="flex--item" style="width: 80px;">Level:</div>
+                        <div class="flex--item">
+                            <span id="battery-level">--</span>%
+                        </div>
+                        <div class="flex--item">
+                            <div class="d-flex ai-center" id="battery-level-bar">
+                                <div class="s-progress" style="width: 100px;">
+                                    <div class="s-progress--bar" style="width: 0%;"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="d-flex ai-center">
+                        <div class="flex--item" style="width: 80px;">Voltage:</div>
+                        <div class="flex--item">
+                            <span id="battery-voltage">--</span>V
+                        </div>
+                    </div>
+                    <div class="d-flex ai-center">
+                        <div class="flex--item" style="width: 80px;">Status:</div>
+                        <div class="flex--item">
+                            <span id="battery-status">Unknown</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- System Load Section -->
+            <div>
+                <h5 class="mb-2">System</h5>
+                <div class="d-flex fd-column g4">
+                    <div class="d-flex ai-center g8">
+                        <div class="flex--item" style="width: 80px;">CPU:</div>
+                        <div class="flex--item">
+                            <span id="cpu-usage">--</span>%
+                        </div>
+                        <div class="flex--item">
+                            <div class="d-flex ai-center" id="cpu-usage-bar">
+                                <div class="s-progress" style="width: 100px;">
+                                    <div class="s-progress--bar" style="width: 0%;"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="d-flex ai-center g8">
+                        <div class="flex--item" style="width: 80px;">Memory:</div>
+                        <div class="flex--item">
+                            <span id="memory-usage">--</span>%
+                        </div>
+                        <div class="flex--item">
+                            <div class="d-flex ai-center" id="memory-usage-bar">
+                                <div class="s-progress" style="width: 100px;">
+                                    <div class="s-progress--bar" style="width: 0%;"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="d-flex ai-center">
+                        <div class="flex--item" style="width: 80px;">Load:</div>
+                        <div class="flex--item">
+                            <span id="load-average">--</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Last Updated -->
+            <div class="mt-2 fs-caption fc-light">
+                Last updated: <span id="telemetry-timestamp">--</span>
+                <button class="s-btn s-btn__xs ml-2" id="refresh-telemetry">
+                    Refresh
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 
 <script>
     // Use the local client bridge server URL

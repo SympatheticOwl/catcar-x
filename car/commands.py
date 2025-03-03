@@ -3,6 +3,8 @@ from typing import List, Dict, Tuple
 import numpy as np
 import asyncio
 import math
+
+from telemetry import Telemetry
 from state_handler import State
 from streaming_vision_system import VisionSystem
 from picarx_wrapper import PicarXWrapper
@@ -17,6 +19,7 @@ class Commands:
         self.px = PicarXWrapper(self.state)
         self.vision = VisionSystem(self.state)
         self.object_system = UltrasonicSystem(self.state, self.px)
+        self.telemetry = Telemetry()  # Initialize telemetry system
 
         # task states
         # always running for safety
@@ -81,6 +84,33 @@ class Commands:
 
     def get_object_distance(self):
         return self.state.current_distance
+
+    def get_telemetry(self):
+        """
+        Get system telemetry including battery level and CPU temperature
+
+        Returns:
+            Dictionary with telemetry data
+        """
+        return self.telemetry.get_all_telemetry()
+
+    def get_battery_level(self):
+        """
+        Get battery level information if available
+
+        Returns:
+            Dictionary with battery info
+        """
+        return self.telemetry.get_battery_level()
+
+    def get_cpu_temperature(self):
+        """
+        Get CPU temperature
+
+        Returns:
+            Float: CPU temperature in Celsius
+        """
+        return self.telemetry.get_cpu_temperature()
 
     # TODO: set speed state
     # TODO: fix error
