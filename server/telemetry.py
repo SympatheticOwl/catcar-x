@@ -182,9 +182,13 @@ class Telemetry:
         Returns:
             dict: Dictionary containing all telemetry metrics
         """
-        return {
+        data = {
             "cpu_temperature": self.get_cpu_temperature(),
             "battery": self.get_battery_level(),
             "system": self.get_system_load(),
             "timestamp": time.time()
         }
+
+        print(f"Telemetry data: {data}")
+
+        return data

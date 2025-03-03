@@ -28,18 +28,28 @@ document.addEventListener('wifi-controller-loaded', function() {
     initializeWifiController();
 });
 
+// Global telemetry variables
+let telemetryUpdateInterval = null;
+const telemetryUpdateIntervalMs = 5000; // Update every 5 seconds
+
 // Initialize Bluetooth controller
 function initializeBluetoothController() {
     console.log('Initializing Bluetooth controller...');
 
-    const btContainer = document.getElementById('bt-content');
-    if (!btContainer) return;
+    const btContainer = document.getElementById('bt-content') || document.getElementById('bt-controller-content');
+    if (!btContainer) {
+        console.warn('Bluetooth container not found');
+        return;
+    }
 
     // Re-initialize all event listeners and components
     setupButtonHandlers(btContainer, true);
 
+    // Initialize telemetry components
+    initializeTelemetry(btContainer, true);
+
     // Re-initialize any additional Bluetooth-specific functionality
-    const btStatus = btContainer.querySelector('#status');
+    const btStatus = btContainer.querySelector('#status') || btContainer.querySelector('#bt-status');
     if (btStatus) {
         btStatus.textContent = 'Status: Bluetooth controller ready';
     }
@@ -51,19 +61,294 @@ function initializeBluetoothController() {
 function initializeWifiController() {
     console.log('Initializing WiFi controller...');
 
-    const wifiContainer = document.getElementById('wifi-content');
-    if (!wifiContainer) return;
+    const wifiContainer = document.getElementById('wifi-content') || document.getElementById('wifi-controller-content');
+    if (!wifiContainer) {
+        console.warn('WiFi container not found');
+        return;
+    }
 
     // Re-initialize all event listeners and components
     setupButtonHandlers(wifiContainer, false);
 
+    // Initialize telemetry components for WiFi if needed
+    initializeTelemetry(wifiContainer, false);
+
     // Re-initialize any additional WiFi-specific functionality
-    const wifiStatus = wifiContainer.querySelector('#status');
+    const wifiStatus = wifiContainer.querySelector('#status') || wifiContainer.querySelector('#wifi-status');
     if (wifiStatus) {
         wifiStatus.textContent = 'Status: WiFi controller ready';
     }
 
     console.log('WiFi controller initialized');
+}
+
+// Initialize telemetry components and functionality
+function initializeTelemetry(container, isBluetooth) {
+    if (!container) return;
+
+    // Get API base URL based on controller type
+    const apiUrl = isBluetooth ? window.location.origin : 'http://10.0.0.219:8000';
+
+    // Find telemetry elements
+    const elements = {
+        cpuTemp: container.querySelector('#cpu-temp'),
+        cpuTempBar: container.querySelector('#cpu-temp-bar .s-progress--bar'),
+        batteryLevel: container.querySelector('#battery-level'),
+        batteryLevelBar: container.querySelector('#battery-level-bar .s-progress--bar'),
+        batteryVoltage: container.querySelector('#battery-voltage'),
+        batteryStatus: container.querySelector('#battery-status'),
+        cpuUsage: container.querySelector('#cpu-usage'),
+        cpuUsageBar: container.querySelector('#cpu-usage-bar .s-progress--bar'),
+        memoryUsage: container.querySelector('#memory-usage'),
+        memoryUsageBar: container.querySelector('#memory-usage-bar .s-progress--bar'),
+        loadAverage: container.querySelector('#load-average'),
+        timestamp: container.querySelector('#telemetry-timestamp'),
+        refreshButton: container.querySelector('#refresh-telemetry')
+    };
+
+    // If telemetry elements don't exist, log and return
+    if (!elements.cpuTemp) {
+        console.log('Telemetry elements not found in this container');
+        return;
+    }
+
+    console.log('Initializing telemetry components');
+
+    // Add click event for refresh button
+    if (elements.refreshButton) {
+        elements.refreshButton.addEventListener('click', () => {
+            fetchTelemetry(apiUrl, elements);
+        });
+    }
+
+    // Listen for connection/disconnection events specific to this controller
+    const connectButton = container.querySelector('#connectButton');
+    const disconnectButton = container.querySelector('#disconnectButton');
+
+    if (connectButton) {
+        // Add event to start telemetry updates on successful connection
+        connectButton.addEventListener('click', function() {
+            // We need to check if connection was successful
+            setTimeout(() => {
+                const connectionStatus = container.querySelector('#connectionStatus');
+                if (connectionStatus && connectionStatus.classList.contains('connected')) {
+                    startTelemetryUpdates(apiUrl, elements);
+                }
+            }, 1000); // Small delay to allow connection status to update
+        });
+    }
+
+    if (disconnectButton) {
+        // Stop telemetry updates on disconnect
+        disconnectButton.addEventListener('click', function() {
+            stopTelemetryUpdates();
+            resetTelemetryDisplay(elements);
+        });
+    }
+
+    // Check if already connected and start telemetry if needed
+    const connectionStatus = container.querySelector('#connectionStatus');
+    if (connectionStatus && connectionStatus.classList.contains('connected')) {
+        startTelemetryUpdates(apiUrl, elements);
+    }
+}
+
+// Function to start periodic telemetry updates
+function startTelemetryUpdates(apiUrl, elements) {
+    // Clear any existing interval
+    stopTelemetryUpdates();
+
+    // Fetch telemetry immediately
+    fetchTelemetry(apiUrl, elements);
+
+    // Start periodic updates
+    telemetryUpdateInterval = setInterval(() => {
+        fetchTelemetry(apiUrl, elements);
+    }, telemetryUpdateIntervalMs);
+
+    console.log('Telemetry updates started');
+}
+
+// Function to stop telemetry updates
+function stopTelemetryUpdates() {
+    if (telemetryUpdateInterval) {
+        clearInterval(telemetryUpdateInterval);
+        telemetryUpdateInterval = null;
+        console.log('Telemetry updates stopped');
+    }
+}
+
+// Function to fetch telemetry data
+function fetchTelemetry(apiUrl, elements) {
+    console.log('Fetching telemetry data');
+
+    // Use AbortController for timeout control
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000); // 3s timeout
+
+    fetch(`${apiUrl}/telemetry`, {
+        signal: controller.signal
+    })
+    .then(response => response.json())
+    .then(data => {
+        clearTimeout(timeoutId);
+        if (data.status === 'success' && data.telemetry) {
+            updateTelemetryDisplay(elements, data.telemetry);
+        } else {
+            console.error('Error fetching telemetry:', data.message || 'Unknown error');
+        }
+    })
+    .catch(error => {
+        clearTimeout(timeoutId);
+        if (error.name === 'AbortError') {
+            console.log('Telemetry request timed out');
+        } else {
+            console.error('Error fetching telemetry:', error);
+        }
+    });
+}
+
+// Function to update telemetry display with new data
+function updateTelemetryDisplay(elements, telemetry) {
+    // Update CPU temperature
+    if (telemetry.cpu_temperature !== undefined && elements.cpuTemp && elements.cpuTempBar) {
+        elements.cpuTemp.textContent = telemetry.cpu_temperature.toFixed(1);
+
+        // Update progress bar (0-100°C range)
+        const percentage = Math.min(100, Math.max(0, telemetry.cpu_temperature / 100 * 100));
+        elements.cpuTempBar.style.width = `${percentage}%`;
+
+        // Change color based on temperature
+        const progressElement = elements.cpuTempBar.closest('.s-progress');
+        progressElement.className = 's-progress';
+
+        if (telemetry.cpu_temperature > 80) {
+            progressElement.classList.add('s-progress__danger');
+        } else if (telemetry.cpu_temperature > 65) {
+            progressElement.classList.add('s-progress__warning');
+        } else {
+            progressElement.classList.add('s-progress__success');
+        }
+    }
+
+    // Update battery information if available
+    if (telemetry.battery) {
+        const battery = telemetry.battery;
+
+        // Update battery level
+        if (battery.percentage !== null && elements.batteryLevel && elements.batteryLevelBar) {
+            elements.batteryLevel.textContent = battery.percentage.toFixed(1);
+
+            // Update progress bar
+            const percentage = Math.min(100, Math.max(0, battery.percentage));
+            elements.batteryLevelBar.style.width = `${percentage}%`;
+
+            // Change color based on level
+            const progressElement = elements.batteryLevelBar.closest('.s-progress');
+            progressElement.className = 's-progress';
+
+            if (battery.percentage < 20) {
+                progressElement.classList.add('s-progress__danger');
+            } else if (battery.percentage < 40) {
+                progressElement.classList.add('s-progress__warning');
+            } else {
+                progressElement.classList.add('s-progress__success');
+            }
+        } else if (elements.batteryLevel) {
+            elements.batteryLevel.textContent = 'N/A';
+        }
+
+        // Update voltage
+        if (battery.voltage !== null && elements.batteryVoltage) {
+            elements.batteryVoltage.textContent = battery.voltage.toFixed(2);
+        } else if (elements.batteryVoltage) {
+            elements.batteryVoltage.textContent = 'N/A';
+        }
+
+        // Update charging status
+        if (battery.is_charging !== null && elements.batteryStatus) {
+            elements.batteryStatus.textContent = battery.is_charging ? 'Charging' : 'Discharging';
+        } else if (elements.batteryStatus) {
+            elements.batteryStatus.textContent = battery.available ? 'Unknown' : 'Not Available';
+        }
+    }
+
+    // Update system information
+    if (telemetry.system) {
+        const system = telemetry.system;
+
+        // Update CPU usage
+        if (system.cpu_usage !== undefined && elements.cpuUsage && elements.cpuUsageBar) {
+            elements.cpuUsage.textContent = system.cpu_usage.toFixed(1);
+
+            // Update progress bar
+            const percentage = Math.min(100, Math.max(0, system.cpu_usage));
+            elements.cpuUsageBar.style.width = `${percentage}%`;
+
+            // Change color based on usage
+            const progressElement = elements.cpuUsageBar.closest('.s-progress');
+            progressElement.className = 's-progress';
+
+            if (system.cpu_usage > 90) {
+                progressElement.classList.add('s-progress__danger');
+            } else if (system.cpu_usage > 70) {
+                progressElement.classList.add('s-progress__warning');
+            } else {
+                progressElement.classList.add('s-progress__success');
+            }
+        }
+
+        // Update memory usage
+        if (system.memory_usage !== undefined && elements.memoryUsage && elements.memoryUsageBar) {
+            elements.memoryUsage.textContent = system.memory_usage.toFixed(1);
+
+            // Update progress bar
+            const percentage = Math.min(100, Math.max(0, system.memory_usage));
+            elements.memoryUsageBar.style.width = `${percentage}%`;
+
+            // Change color based on usage
+            const progressElement = elements.memoryUsageBar.closest('.s-progress');
+            progressElement.className = 's-progress';
+
+            if (system.memory_usage > 90) {
+                progressElement.classList.add('s-progress__danger');
+            } else if (system.memory_usage > 70) {
+                progressElement.classList.add('s-progress__warning');
+            } else {
+                progressElement.classList.add('s-progress__success');
+            }
+        }
+
+        // Update load average
+        if (system.load_average && elements.loadAverage) {
+            elements.loadAverage.textContent = system.load_average.map(val => val.toFixed(2)).join(', ');
+        }
+    }
+
+    // Update timestamp
+    if (telemetry.timestamp && elements.timestamp) {
+        const date = new Date(telemetry.timestamp * 1000);
+        elements.timestamp.textContent = date.toLocaleTimeString();
+    }
+}
+
+// Function to reset telemetry display to default values
+function resetTelemetryDisplay(elements) {
+    if (!elements) return;
+
+    // Reset all display elements to their default values
+    if (elements.cpuTemp) elements.cpuTemp.textContent = '--';
+    if (elements.cpuTempBar) elements.cpuTempBar.style.width = '0%';
+    if (elements.batteryLevel) elements.batteryLevel.textContent = '--';
+    if (elements.batteryLevelBar) elements.batteryLevelBar.style.width = '0%';
+    if (elements.batteryVoltage) elements.batteryVoltage.textContent = '--';
+    if (elements.batteryStatus) elements.batteryStatus.textContent = 'Unknown';
+    if (elements.cpuUsage) elements.cpuUsage.textContent = '--';
+    if (elements.cpuUsageBar) elements.cpuUsageBar.style.width = '0%';
+    if (elements.memoryUsage) elements.memoryUsage.textContent = '--';
+    if (elements.memoryUsageBar) elements.memoryUsageBar.style.width = '0%';
+    if (elements.loadAverage) elements.loadAverage.textContent = '--';
+    if (elements.timestamp) elements.timestamp.textContent = '--';
 }
 
 // Setup button event handlers for a controller
@@ -198,6 +483,38 @@ function setupButtonHandlers(container, isBluetooth) {
     setupButton('down', 'backward');
     setupButton('left', 'left', -30);
     setupButton('right', 'right', 30);
+
+    // Setup speed control if present
+    const speedControl = container.querySelector('#speedControl');
+    if (speedControl) {
+        const speedValue = container.querySelector('#speedValue');
+
+        // Clone to remove existing listeners
+        const newSpeedControl = speedControl.cloneNode(true);
+        speedControl.parentNode.replaceChild(newSpeedControl, speedControl);
+
+        // Add event listener for speed changes
+        newSpeedControl.addEventListener('change', async function() {
+            const speed = parseFloat(this.value);
+            if (speedValue) {
+                speedValue.textContent = speed.toFixed(2);
+            }
+
+            // Send the speed command
+            await sendCommand('set_speed', {
+                speed: speed,
+                // Use content type application/json
+                contentType: 'application/json'
+            });
+        });
+
+        // Update speed value display if present
+        newSpeedControl.addEventListener('input', function() {
+            if (speedValue) {
+                speedValue.textContent = parseFloat(this.value).toFixed(2);
+            }
+        });
+    }
 
     // Setup scan environment button
     const scanEnvBtn = container.querySelector('#scanEnv');
@@ -392,11 +709,40 @@ function setupButtonHandlers(container, isBluetooth) {
                             button.disabled = false;
                         });
 
+                        // Enable speed control if present
+                        if (container.querySelector('#speedControl')) {
+                            container.querySelector('#speedControl').disabled = false;
+                        }
+
                         newConnectBtn.disabled = true;
                         newDisconnectBtn.disabled = false;
 
                         // Save address for future use
                         localStorage.setItem('picarx_bt_address', address);
+
+                        // Trigger a custom event that telemetry can listen for
+                        document.dispatchEvent(new CustomEvent('picarx-connected'));
+
+                        // Start telemetry updates by finding the telemetry elements again
+                        const telemetryElements = {
+                            cpuTemp: container.querySelector('#cpu-temp'),
+                            cpuTempBar: container.querySelector('#cpu-temp-bar .s-progress--bar'),
+                            batteryLevel: container.querySelector('#battery-level'),
+                            batteryLevelBar: container.querySelector('#battery-level-bar .s-progress--bar'),
+                            batteryVoltage: container.querySelector('#battery-voltage'),
+                            batteryStatus: container.querySelector('#battery-status'),
+                            cpuUsage: container.querySelector('#cpu-usage'),
+                            cpuUsageBar: container.querySelector('#cpu-usage-bar .s-progress--bar'),
+                            memoryUsage: container.querySelector('#memory-usage'),
+                            memoryUsageBar: container.querySelector('#memory-usage-bar .s-progress--bar'),
+                            loadAverage: container.querySelector('#load-average'),
+                            timestamp: container.querySelector('#telemetry-timestamp')
+                        };
+
+                        // Start telemetry updates if elements exist
+                        if (telemetryElements.cpuTemp) {
+                            startTelemetryUpdates(apiUrl, telemetryElements);
+                        }
                     } else {
                         if (container.querySelector('#status')) {
                             container.querySelector('#status').textContent = `Status: ${data.message}`;
@@ -429,6 +775,11 @@ function setupButtonHandlers(container, isBluetooth) {
                         button.disabled = true;
                     });
 
+                    // Disable speed control if present
+                    if (container.querySelector('#speedControl')) {
+                        container.querySelector('#speedControl').disabled = true;
+                    }
+
                     newConnectBtn.disabled = false;
                     newDisconnectBtn.disabled = true;
 
@@ -441,6 +792,30 @@ function setupButtonHandlers(container, isBluetooth) {
                         videoFeed.src = '';
                         toggleVideoBtn.textContent = 'Start Video Feed';
                     }
+
+                    // Trigger a custom event that telemetry can listen for
+                    document.dispatchEvent(new CustomEvent('picarx-disconnected'));
+
+                    // Stop telemetry updates
+                    stopTelemetryUpdates();
+
+                    // Reset telemetry display
+                    const telemetryElements = {
+                        cpuTemp: container.querySelector('#cpu-temp'),
+                        cpuTempBar: container.querySelector('#cpu-temp-bar .s-progress--bar'),
+                        batteryLevel: container.querySelector('#battery-level'),
+                        batteryLevelBar: container.querySelector('#battery-level-bar .s-progress--bar'),
+                        batteryVoltage: container.querySelector('#battery-voltage'),
+                        batteryStatus: container.querySelector('#battery-status'),
+                        cpuUsage: container.querySelector('#cpu-usage'),
+                        cpuUsageBar: container.querySelector('#cpu-usage-bar .s-progress--bar'),
+                        memoryUsage: container.querySelector('#memory-usage'),
+                        memoryUsageBar: container.querySelector('#memory-usage-bar .s-progress--bar'),
+                        loadAverage: container.querySelector('#load-average'),
+                        timestamp: container.querySelector('#telemetry-timestamp')
+                    };
+
+                    resetTelemetryDisplay(telemetryElements);
                 } catch (error) {
                     if (container.querySelector('#status')) {
                         container.querySelector('#status').textContent = `Error: ${error.message}`;
@@ -449,4 +824,91 @@ function setupButtonHandlers(container, isBluetooth) {
             });
         }
     }
+
+    // Add keyboard controls
+    document.addEventListener('keydown', function(event) {
+        // Only handle keyboard events if this controller is active
+        if (!container.contains(document.activeElement) &&
+            !container.matches(':focus-within') &&
+            document.activeElement !== document.body) {
+            return;
+        }
+
+        const validKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'];
+        if (!validKeys.includes(event.key)) return;
+
+        event.preventDefault(); // Prevent scrolling
+
+        // Find the corresponding button
+        let buttonId;
+        switch (event.key) {
+            case 'ArrowUp':
+                buttonId = 'up';
+                break;
+            case 'ArrowDown':
+                buttonId = 'down';
+                break;
+            case 'ArrowLeft':
+                buttonId = 'left';
+                break;
+            case 'ArrowRight':
+                buttonId = 'right';
+                break;
+            case 'Space':
+                // Space should trigger stop
+                sendCommand('stop');
+                return;
+        }
+
+        const button = container.querySelector(`#${buttonId}`);
+        if (button && !button.disabled) {
+            // Trigger the mousedown event on the button
+            button.dispatchEvent(new MouseEvent('mousedown', {
+                bubbles: true,
+                cancelable: true,
+                view: window
+            }));
+        }
+    });
+
+    document.addEventListener('keyup', function(event) {
+        // Only handle keyboard events if this controller is active
+        if (!container.contains(document.activeElement) &&
+            !container.matches(':focus-within') &&
+            document.activeElement !== document.body) {
+            return;
+        }
+
+        const validKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+        if (!validKeys.includes(event.key)) return;
+
+        event.preventDefault();
+
+        // Find the corresponding button
+        let buttonId;
+        switch (event.key) {
+            case 'ArrowUp':
+                buttonId = 'up';
+                break;
+            case 'ArrowDown':
+                buttonId = 'down';
+                break;
+            case 'ArrowLeft':
+                buttonId = 'left';
+                break;
+            case 'ArrowRight':
+                buttonId = 'right';
+                break;
+        }
+
+        const button = container.querySelector(`#${buttonId}`);
+        if (button) {
+            // Trigger the mouseup event on the button
+            button.dispatchEvent(new MouseEvent('mouseup', {
+                bubbles: true,
+                cancelable: true,
+                view: window
+            }));
+        }
+    });
 }

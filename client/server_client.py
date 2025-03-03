@@ -402,6 +402,11 @@ def initialize_controllers():
     """Serve the script to initialize the controllers after HTMX load"""
     return send_from_directory('static/scripts', 'initialize-controllers.js')
 
+@app.route('/scripts/telemetry.js')
+def serve_telemetry_js():
+    """Serve the script to initialize the controllers after HTMX load"""
+    return send_from_directory('static/scripts', 'telemetry.js')
+
 
 @app.route('/stacks.min.css')
 def serve_stacks_css():
@@ -500,6 +505,7 @@ def get_telemetry():
 
     # Use cached data if available and not expired
     response = bridge.send_command('telemetry', 'all', use_cache=True, timeout=5)
+    print(f"Telemetry response: {response}")
     return jsonify(response)
 
 
