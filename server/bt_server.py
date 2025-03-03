@@ -6,7 +6,7 @@ import asyncio
 import numpy as np
 import time
 from bluedot.btcomm import BluetoothServer as BlueDotServer
-from car.commands import Commands
+from ..car.commands import Commands
 
 
 def numpy_json_encoder(obj):
