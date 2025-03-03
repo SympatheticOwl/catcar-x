@@ -119,8 +119,9 @@ class BTServer:
             endpoint = request.get('endpoint', '')
             cmd = request.get('cmd', '')
             params = request.get('params', {})
+            command_id = request.get('command_id', None)  # Extract the command_id
 
-            print(f"Received command: {endpoint}/{cmd} with params: {params}")
+            print(f"Received command: {endpoint}/{cmd} with params: {params}, ID: {command_id}")
 
             # Handle different command types
             response = None
@@ -133,12 +134,25 @@ class BTServer:
             elif endpoint == 'visualization':
                 response = self.handle_visualization()
             elif endpoint == 'telemetry':
-                response = self.handle_telemetry(cmd)
+                # Pass the entire request to include command_id
+                response = self.handle_telemetry(cmd, command_id)
             else:
                 response = json.dumps({
                     "status": "error",
-                    "message": f"Unknown endpoint: {endpoint}"
+                    "message": f"Unknown endpoint: {endpoint}",
+                    "command_id": command_id  # Include command_id in error response
                 })
+
+            # Ensure command_id is included in response if it's a dict
+            if isinstance(response, str):
+                try:
+                    response_dict = json.loads(response)
+                    if isinstance(response_dict, dict) and 'command_id' not in response_dict and command_id:
+                        response_dict['command_id'] = command_id
+                        response = json.dumps(response_dict)
+                except json.JSONDecodeError:
+                    # Not JSON, leave as is
+                    pass
 
             return response
         except json.JSONDecodeError:
@@ -153,6 +167,54 @@ class BTServer:
                 "status": "error",
                 "message": str(e)
             })
+
+    def send_chunked_response(self, data, command_id=None, chunk_size=1024):
+        """
+        Send large responses in chunks to avoid Bluetooth transmission issues
+
+        Args:
+            data (str): JSON string to be sent
+            command_id (str, optional): Command ID to track the response
+            chunk_size (int, optional): Size of each chunk
+        """
+        if not command_id:
+            command_id = "server_" + str(int(time.time()))
+
+        # Calculate number of chunks
+        total_size = len(data)
+        chunks = (total_size + chunk_size - 1) // chunk_size
+
+        # Send start marker
+        start_marker = json.dumps({
+            "type": "chunked_start",
+            "command_id": command_id,
+            "total_size": total_size,
+            "chunks": chunks
+        })
+        print(f"Sending chunked response start: {start_marker}")
+
+        # Send the actual data in chunks
+        for i in range(chunks):
+            start_pos = i * chunk_size
+            end_pos = min(start_pos + chunk_size, total_size)
+            chunk_data = data[start_pos:end_pos]
+
+            chunk = json.dumps({
+                "type": "chunk",
+                "command_id": command_id,
+                "chunk_index": i,
+                "data": chunk_data
+            })
+            print(f"Sending chunk {i + 1}/{chunks}, size: {len(chunk_data)}")
+
+        # Send end marker
+        end_marker = json.dumps({
+            "type": "chunked_end",
+            "command_id": command_id
+        })
+        print(f"Sending chunked response end: {end_marker}")
+
+        return True
 
     def handle_command(self, cmd, params):
         """Handle robot command endpoints"""
@@ -327,7 +389,7 @@ class BTServer:
                 "message": str(e)
             })
 
-    def handle_telemetry(self, cmd):
+    def handle_telemetry(self, cmd, command_id):
         """Handle telemetry endpoint requests"""
         if not self.manager.commands:
             return json.dumps({
@@ -339,17 +401,36 @@ class BTServer:
             if cmd == "all":
                 # Get all telemetry data
                 telemetry_data = self.manager.commands.get_telemetry()
-                return json.dumps({
+
+                # Prepare the response
+                response = {
                     "status": "success",
                     "telemetry": telemetry_data
-                }, default=numpy_json_encoder)
+                }
+
+                # Convert to JSON string
+                json_response = json.dumps(response, default=numpy_json_encoder)
+
+                # Check if the response is large and needs chunking (e.g., over 1KB)
+                if len(json_response) > 1024:
+                    print(f"Telemetry response is large ({len(json_response)} bytes), sending chunked")
+                    self.send_chunked_response(json_response, command_id)
+                    # Return a placeholder to indicate chunked response is being sent
+                    return json.dumps({
+                        "status": "processing",
+                        "message": "Sending telemetry data in chunks"
+                    })
+
+                # If small enough, send directly
+                return json_response
 
             elif cmd == "battery":
                 # Get just battery information
                 battery_data = self.manager.commands.get_battery_level()
                 return json.dumps({
                     "status": "success",
-                    "battery": battery_data
+                    "battery": battery_data,
+                    "command_id": command_id
                 }, default=numpy_json_encoder)
 
             elif cmd == "temperature":
@@ -357,13 +438,15 @@ class BTServer:
                 temp = self.manager.commands.get_cpu_temperature()
                 return json.dumps({
                     "status": "success",
-                    "temperature": temp
+                    "temperature": temp,
+                    "command_id": command_id
                 }, default=numpy_json_encoder)
 
             else:
                 return json.dumps({
                     "status": "error",
-                    "message": f"Unknown telemetry command: {cmd}. Available commands: all, battery, temperature"
+                    "message": f"Unknown telemetry command: {cmd}. Available commands: all, battery, temperature",
+                    "command_id": command_id
                 })
 
         except Exception as e:
@@ -371,7 +454,8 @@ class BTServer:
             traceback.print_exc()
             return json.dumps({
                 "status": "error",
-                "message": str(e)
+                "message": str(e),
+                "command_id": command_id
             })
 
     def cleanup(self):

@@ -61,8 +61,8 @@ class PicarXBridge:
                                           data_received_callback=self.data_received,
                                           port=2,
                                           auto_connect=True,
-                                          device="hci0",  # Explicitly set Bluetooth device
-                                          encoding=None)  # Important: use binary mode for large responses
+                                          device="hci0",
+                                          encoding='utf-8')
             self.connected = True
             print("Connected to Raspberry Pi")
             return True
@@ -184,6 +184,149 @@ class PicarXBridge:
                 # Not JSON, append to buffer
                 with self.buffer_lock:
                     self.data_buffer += data_chunk
+
+        except Exception as e:
+            print(f"Error processing data chunk: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def process_data_chunk(self, data_chunk):
+        """Process a chunk of data received from the Pi"""
+        try:
+            # Convert binary data to string if needed
+            if isinstance(data_chunk, bytes):
+                data_chunk = data_chunk.decode('utf-8', errors='replace')
+
+            print(f"Processing data chunk of length: {len(data_chunk)}")
+
+            # Try to parse as JSON first
+            try:
+                response = json.loads(data_chunk)
+
+                # Handle chunked data protocol
+                if isinstance(response, dict) and 'type' in response:
+                    if response['type'] == 'chunked_start':
+                        # Initialize a new chunked response
+                        cmd_id = response.get('command_id')
+                        print(f"Starting chunked response for command {cmd_id}")
+                        with self.buffer_lock:
+                            self.chunked_buffers = getattr(self, 'chunked_buffers', {})
+                            self.chunked_buffers[cmd_id] = {
+                                'data': '',
+                                'total_size': response.get('total_size', 0),
+                                'received_chunks': 0,
+                                'total_chunks': response.get('chunks', 0)
+                            }
+                        return
+
+                    elif response['type'] == 'chunk':
+                        # Add chunk to the buffer
+                        cmd_id = response.get('command_id')
+                        chunk_index = response.get('chunk_index', -1)
+
+                        print(f"Received chunk {chunk_index} for command {cmd_id}")
+
+                        with self.buffer_lock:
+                            if hasattr(self, 'chunked_buffers') and cmd_id in self.chunked_buffers:
+                                self.chunked_buffers[cmd_id]['data'] += response.get('data', '')
+                                self.chunked_buffers[cmd_id]['received_chunks'] += 1
+
+                                # Log progress
+                                progress = self.chunked_buffers[cmd_id]['received_chunks'] / \
+                                           self.chunked_buffers[cmd_id]['total_chunks'] * 100
+                                print(f"Chunked transfer progress: {progress:.1f}%")
+                        return
+
+                    elif response['type'] == 'chunked_end':
+                        # Process the complete chunked response
+                        cmd_id = response.get('command_id')
+                        print(f"Completed chunked response for command {cmd_id}")
+
+                        with self.buffer_lock:
+                            if hasattr(self, 'chunked_buffers') and cmd_id in self.chunked_buffers:
+                                complete_data = self.chunked_buffers[cmd_id]['data']
+                                try:
+                                    # The complete data might itself be a JSON string
+                                    complete_response = json.loads(complete_data)
+                                    # Add the command_id if not present
+                                    if isinstance(complete_response, dict) and 'command_id' not in complete_response:
+                                        complete_response['command_id'] = cmd_id
+
+                                    # Handle the complete response
+                                    with self.command_lock:
+                                        if cmd_id in self.pending_commands:
+                                            print(f"Putting chunked response in command queue for ID: {cmd_id}")
+                                            self.pending_commands[cmd_id].put(complete_response)
+                                        else:
+                                            print(
+                                                f"Command ID {cmd_id} not found in pending commands, using general queue")
+                                            self.response_queue.put(complete_response)
+                                except json.JSONDecodeError:
+                                    print(f"Error parsing chunked response JSON: {complete_data[:100]}...")
+                                    # If not valid JSON, treat as raw data
+                                    raw_response = {"status": "success", "data": complete_data, "command_id": cmd_id}
+                                    with self.command_lock:
+                                        if cmd_id in self.pending_commands:
+                                            self.pending_commands[cmd_id].put(raw_response)
+                                        else:
+                                            self.response_queue.put(raw_response)
+                                # Clean up
+                                del self.chunked_buffers[cmd_id]
+                        return
+
+                # For non-chunked responses, handle normally
+                self.handle_response(response)
+                return
+
+            except json.JSONDecodeError:
+                # Not valid JSON, append to buffer for potential incomplete JSON
+                with self.buffer_lock:
+                    self.data_buffer += data_chunk
+
+                    # Attempt to find valid JSON within the buffer
+                    buffer_size = len(self.data_buffer)
+                    if buffer_size > 500000:  # Safety limit to prevent memory issues
+                        print(f"Buffer too large ({buffer_size} bytes), clearing")
+                        self.data_buffer = data_chunk  # Start fresh with this chunk
+
+                    # Look for complete JSON objects
+                    if '{' in self.data_buffer:
+                        try:
+                            # Try to find balanced braces for complete JSON objects
+                            buffer = self.data_buffer
+                            start_index = buffer.find('{')
+
+                            if start_index >= 0:
+                                # Count opening and closing braces
+                                stack = []
+                                for i in range(start_index, len(buffer)):
+                                    if buffer[i] == '{':
+                                        stack.append('{')
+                                    elif buffer[i] == '}':
+                                        if stack and stack[-1] == '{':
+                                            stack.pop()
+                                        else:
+                                            # Unbalanced - this means the JSON is likely corrupted
+                                            stack.append('}')  # Ensure we don't have an empty stack
+
+                                    # When stack is empty, we found a complete JSON object
+                                    if i > start_index and not stack:
+                                        # Extract the potential JSON
+                                        json_str = buffer[start_index:i + 1]
+                                        try:
+                                            # Try to parse it
+                                            json_obj = json.loads(json_str)
+                                            # Successfully parsed, update buffer
+                                            self.data_buffer = buffer[i + 1:]
+                                            # Handle this JSON object
+                                            self.handle_response(json_obj)
+                                            # Start over with the new buffer
+                                            break
+                                        except json.JSONDecodeError:
+                                            # Not valid JSON, continue searching
+                                            pass
+                        except Exception as e:
+                            print(f"Error processing JSON in buffer: {e}")
 
         except Exception as e:
             print(f"Error processing data chunk: {e}")
@@ -503,8 +646,8 @@ def get_telemetry():
     if not bridge.connected:
         return jsonify({"status": "error", "message": "Not connected to Raspberry Pi"}), 400
 
-    # Use cached data if available and not expired
-    response = bridge.send_command('telemetry', 'all', use_cache=True, timeout=5)
+    # Increase timeout for all telemetry data
+    response = bridge.send_command('telemetry', 'all', use_cache=True, timeout=15)
     print(f"Telemetry response: {response}")
     return jsonify(response)
 
@@ -515,8 +658,8 @@ def get_battery():
     if not bridge.connected:
         return jsonify({"status": "error", "message": "Not connected to Raspberry Pi"}), 400
 
-    # Use cached data if available and not expired
-    response = bridge.send_command('telemetry', 'battery', use_cache=True, timeout=3)
+    # Increase timeout for battery data
+    response = bridge.send_command('telemetry', 'battery', use_cache=True, timeout=5)
     return jsonify(response)
 
 
@@ -526,8 +669,8 @@ def get_temperature():
     if not bridge.connected:
         return jsonify({"status": "error", "message": "Not connected to Raspberry Pi"}), 400
 
-    # Use cached data if available and not expired
-    response = bridge.send_command('telemetry', 'temperature', use_cache=True, timeout=2)
+    # Increase timeout for temperature data
+    response = bridge.send_command('telemetry', 'temperature', use_cache=True, timeout=5)
     return jsonify(response)
 
 
