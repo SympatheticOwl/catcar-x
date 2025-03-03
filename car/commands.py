@@ -4,11 +4,11 @@ import numpy as np
 import asyncio
 import math
 
-from telemetry import Telemetry
 from state_handler import State
 from streaming_vision_system import VisionSystem
 from picarx_wrapper import PicarXWrapper
 from ultrasonic_system import UltrasonicSystem
+from telemetry import Telemetry
 
 # TODO:
 #  attach detected labels to objects in world grid
