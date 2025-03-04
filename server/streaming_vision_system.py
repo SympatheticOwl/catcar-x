@@ -12,7 +12,7 @@ import time
 from picamera2 import Picamera2
 from state_handler import State
 
-
+# TODO: add location tagging to object or object tagging to location
 class VisionSystem:
     def __init__(self, state: State, model_path='../efficientdet_lite0.tflite', labels_path='../coco_labels.txt'):
         # Initialize camera

@@ -33,22 +33,10 @@ os.environ['OPENCV_VIDEOIO_PRIORITY_BACKEND'] = 'v4l2'  # Use V4L2 backend for O
 os.environ['MPLBACKEND'] = 'Agg'  # Force matplotlib to use Agg backend
 
 
-class CommandManager:
-    def __init__(self, commands: Commands):
-        self.commands = commands
-
-
-    def cleanup(self):
-        """Cleanup function to stop all tasks and the event loop"""
-        if self.commands:
-            if self.commands.state.vision_task:
-                self.commands.stop_vision()
-            self.commands.cancel_movement()
-
 class BTServer:
     def __init__(self, commands: Commands):
         print("Initializing Bluetooth server...")
-        self.manager = CommandManager(commands)
+        self.commands = commands
         self.connected_clients = {}
         self.client_lock = threading.Lock()
 
@@ -78,8 +66,8 @@ class BTServer:
             print("Client disconnected (address unknown)")
 
         # Stop any active movement when client disconnects
-        if self.manager.commands:
-            self.manager.commands.cancel_movement()
+        if self.commands:
+            self.commands.cancel_movement()
 
     def data_received(self, data):
         try:
@@ -208,7 +196,7 @@ class BTServer:
         return True
 
     def handle_command(self, cmd, params):
-        if not self.manager.commands:
+        if not self.commands:
             return json.dumps({
                 "status": "error",
                 "message": "Server still initializing"
@@ -216,14 +204,14 @@ class BTServer:
 
         try:
             if cmd == "forward":
-                if self.manager.commands.state.emergency_stop_flag:
+                if self.commands.state.emergency_stop_flag:
                     return json.dumps({
                         "status": "error",
                         "message": "Cannot move forward due to hazard"
                     })
 
                 try:
-                    self.manager.commands.forward()
+                    self.commands.forward()
                 except Exception as e:
                     print(f"Forward movement error: {e}")
 
@@ -233,10 +221,10 @@ class BTServer:
                 })
 
             elif cmd == "backward":
-                self.manager.commands.state.emergency_stop_flag = False
+                self.commands.state.emergency_stop_flag = False
 
                 try:
-                    self.manager.commands.backward()
+                    self.commands.backward()
                 except Exception as e:
                     print(f"Backward movement error: {e}")
 
@@ -248,7 +236,7 @@ class BTServer:
             elif cmd in ["left", "right"]:
                 angle = int(params.get('angle', 30 if cmd == "right" else -30))
 
-                success = self.manager.commands.turn(angle)
+                success = self.commands.turn(angle)
                 if not success:
                     return json.dumps({
                         "status": "error",
@@ -261,11 +249,11 @@ class BTServer:
 
             elif cmd == "stop":
                 try:
-                    self.manager.commands.cancel_movement()
+                    self.commands.cancel_movement()
 
-                    if self.manager.commands.state.movement_task:
-                        self.manager.commands.state.movement_task.cancel()
-                        self.manager.commands.state.movement_task = None
+                    if self.commands.state.movement_task:
+                        self.commands.state.movement_task.cancel()
+                        self.commands.state.movement_task = None
                 except Exception as e:
                     print(f"Stop movement error: {e}")
 
@@ -282,7 +270,7 @@ class BTServer:
                 speed = max(0.1, min(1.0, speed))
 
                 # Set speed in state
-                self.manager.commands.state.speed = speed
+                self.commands.state.speed = speed
 
                 return json.dumps({
                     "status": "success",
@@ -305,22 +293,22 @@ class BTServer:
 
     def handle_status(self):
         """Handle status endpoint"""
-        if not self.manager.commands:
+        if not self.commands:
             return json.dumps({
                 "status": "error",
                 "message": "Server still initializing"
             })
 
         return json.dumps({
-            "object_distance": float(self.manager.commands.get_object_distance()),
-            "emergency_stop": bool(self.manager.commands.state.emergency_stop_flag),
-            "is_moving": bool(self.manager.commands.state.is_moving),
-            "speed": float(self.manager.commands.state.speed)
+            "object_distance": float(self.commands.get_object_distance()),
+            "emergency_stop": bool(self.commands.state.emergency_stop_flag),
+            "is_moving": bool(self.commands.state.is_moving),
+            "speed": float(self.commands.state.speed)
         }, default=numpy_json_encoder)
 
     def handle_telemetry(self, cmd, command_id):
         """Handle telemetry endpoint requests"""
-        if not self.manager.commands:
+        if not self.commands:
             return json.dumps({
                 "status": "error",
                 "message": "Server still initializing"
@@ -328,10 +316,8 @@ class BTServer:
 
         try:
             if cmd == "all":
-                # Get all telemetry data
-                telemetry_data = self.manager.commands.get_telemetry()
+                telemetry_data = self.commands.get_telemetry()
 
-                # Prepare the response
                 response = {
                     "status": "success",
                     "telemetry": telemetry_data,
@@ -341,7 +327,7 @@ class BTServer:
                 # Convert to JSON string
                 json_response = json.dumps(response, default=numpy_json_encoder)
 
-                # Check if the response is large and needs chunking (e.g., over 1KB)
+                # should be able to handle up to 2 megabits for BT 5.0
                 if len(json_response) > 250000:
                     print(f"Telemetry response is large ({len(json_response)} bytes), sending chunked")
                     self.send_chunked_response(json_response, command_id)
@@ -356,7 +342,7 @@ class BTServer:
                 return json_response
 
             elif cmd == "battery":
-                battery_data = self.manager.commands.get_battery_level()
+                battery_data = self.commands.get_battery_level()
                 return json.dumps({
                     "status": "success",
                     "battery": battery_data,
@@ -364,7 +350,7 @@ class BTServer:
                 }, default=numpy_json_encoder)
 
             elif cmd == "temperature":
-                temp = self.manager.commands.get_cpu_temperature()
+                temp = self.commands.get_cpu_temperature()
                 return json.dumps({
                     "status": "success",
                     "temperature": temp,
@@ -389,7 +375,11 @@ class BTServer:
 
     def cleanup(self):
         print("Cleaning up resources...")
-        self.manager.cleanup()
+        if self.commands:
+            if self.commands.state.vision_task:
+                self.commands.stop_vision()
+            self.commands.cancel_movement()
+
         self.server.stop()
 
 

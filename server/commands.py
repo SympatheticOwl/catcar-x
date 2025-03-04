@@ -74,14 +74,6 @@ class Commands:
             return self.vision.get_obstacle_info()
         return []
 
-    # def start_ultrasonic(self):
-    #     self.ultrasonic_task = asyncio.create_task(self.ultrasonic_monitoring())
-
-    # def stop_ultrasonic(self):
-    #     if self.ultrasonic_task:
-    #         self.ultrasonic_task.cancel()
-    #         self.ultrasonic_task = None
-
     def get_object_distance(self):
         return self.state.current_distance
 

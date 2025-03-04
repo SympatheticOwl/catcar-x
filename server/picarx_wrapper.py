@@ -145,5 +145,4 @@ class PicarXWrapper:
 
     # Delegate other Picarx methods to the base class
     def __getattr__(self, attr):
-        """Delegate any other methods to the underlying Picarx instance"""
         return getattr(self.px, attr)

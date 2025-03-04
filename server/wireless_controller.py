@@ -7,10 +7,8 @@ from wifi_server import WifiServer
 
 if __name__ == "__main__":
     try:
-        # Create shared Commands instance
         commands = Commands()
 
-        # Create both servers
         wifi_server = WifiServer(commands)
         bt_server = BTServer(commands)
 
@@ -28,15 +26,11 @@ if __name__ == "__main__":
             daemon=True
         )
 
-        # Start the Flask thread
         flask_thread.start()
-        print("Wifi Server Running in background thread...")
-
-        # Now we can proceed to the Bluetooth server which is already running
+        print("Wifi Server Running in background...")
         print("Bluetooth Server Running...")
         print("Press Ctrl+C to exit.")
 
-        # Keep the main thread alive
         while True:
             time.sleep(1)
 

@@ -9,7 +9,6 @@ from bluedot.btcomm import BluetoothClient
 
 app = Flask(__name__, static_folder='static')
 
-
 # CORS headers
 @app.after_request
 def after_request(response):
@@ -20,34 +19,29 @@ def after_request(response):
     response.headers.add('Access-Control-Expose-Headers', 'Content-Type,Content-Length')
     return response
 
-
-class PicarXBridge:
-    def __init__(self, pi_bluetooth_address=None):
+class BTClient:
+    def __init__(self, pi_bluetooth_address='D8:3A:DD:6D:E3:54'):
         self.bt_address = pi_bluetooth_address
         self.client = None
         self.connected = False
         self.response_queue = queue.Queue()
-        self.frame_queue = queue.Queue(maxsize=10)  # Limit queue size for video frames
-        self.pending_commands = {}  # Track commands waiting for responses
-        self.command_lock = threading.Lock()  # Lock for thread safety
+        self.pending_commands = {}
+        self.command_lock = threading.Lock()
 
-        # Buffer for accumulating large responses
         self.data_buffer = ""
         self.buffer_lock = threading.Lock()
         self.expecting_large_response = False
         self.last_command_id = None
+        self.chunked_buffers = None
 
-        # Cache for telemetry data to reduce Bluetooth traffic
         self.telemetry_cache = {}
         self.telemetry_cache_time = 0
-        self.telemetry_cache_ttl = 5  # Cache TTL in seconds
+        self.telemetry_cache_ttl = 5
 
-        # Start connection thread if address is provided
         if self.bt_address:
-            self.connect_to_pi()
+            self.connect_to_pi(self.bt_address)
 
-    def connect_to_pi(self, bt_address='D8:3A:DD:6D:E3:54'):
-        """Connect to the Raspberry Pi via Bluetooth"""
+    def connect_to_pi(self, bt_address):
         if bt_address:
             self.bt_address = bt_address
 
@@ -92,7 +86,6 @@ class PicarXBridge:
     def _send_ping(self):
         """Send a simple ping command to ensure connection is working"""
         try:
-            # Simple ping command
             ping_cmd = json.dumps({
                 "endpoint": "ping",
                 "cmd": "ping",
@@ -103,7 +96,6 @@ class PicarXBridge:
             print("Sending initial ping command...")
             self.client.send(ping_cmd)
 
-            # Wait a moment for connection to establish
             time.sleep(0.5)
             return True
         except Exception as e:
@@ -383,55 +375,39 @@ class PicarXBridge:
         """Process a complete response object"""
         try:
             print(f"Handling response of type: {type(response)}")
+            try:
+                # Check if this is a response to a pending command
+                with self.command_lock:
+                    # If we have command_id in the response, use it to match with pending commands
+                    if isinstance(response, dict) and 'command_id' in response:
+                        cmd_id = response.get('command_id')
+                        if cmd_id in self.pending_commands:
+                            print(f"Matched response to command ID: {cmd_id}")
+                            # Use a dedicated result queue for this command
+                            self.pending_commands[cmd_id].put(response)
+                            return
 
-            # Check if it's a video frame
-            if isinstance(response, dict) and response.get('type') == 'video_frame':
-                # Handle video frame
-                try:
-                    # If queue is full, remove oldest frame
-                    if self.frame_queue.full():
-                        try:
-                            self.frame_queue.get_nowait()
-                        except queue.Empty:
-                            pass
-                    self.frame_queue.put_nowait(response['frame'])
-                except Exception as e:
-                    print(f"Error adding frame to queue: {e}")
-            else:
-                # Handle other responses
-                try:
-                    # Check if this is a response to a pending command
-                    with self.command_lock:
-                        # If we have command_id in the response, use it to match with pending commands
-                        if isinstance(response, dict) and 'command_id' in response:
-                            cmd_id = response.get('command_id')
-                            if cmd_id in self.pending_commands:
-                                print(f"Matched response to command ID: {cmd_id}")
-                                # Use a dedicated result queue for this command
-                                self.pending_commands[cmd_id].put(response)
-                                return
+                    # If we're expecting a large response for a specific command
+                    if self.expecting_large_response and self.last_command_id:
+                        if self.last_command_id in self.pending_commands:
+                            print(f"Matched large response to last command ID: {self.last_command_id}")
+                            self.pending_commands[self.last_command_id].put(response)
+                            self.expecting_large_response = False
+                            self.last_command_id = None
+                            return
 
-                        # If we're expecting a large response for a specific command
-                        if self.expecting_large_response and self.last_command_id:
-                            if self.last_command_id in self.pending_commands:
-                                print(f"Matched large response to last command ID: {self.last_command_id}")
-                                self.pending_commands[self.last_command_id].put(response)
-                                self.expecting_large_response = False
-                                self.last_command_id = None
-                                return
-
-                    # If no match or no command_id, put in general queue
-                    self.response_queue.put(response, block=False)
-                    print(f"Added response to general queue: {type(response)}")
-                except queue.Full:
-                    # If queue is full, clear it and add the new response
-                    while not self.response_queue.empty():
-                        try:
-                            self.response_queue.get_nowait()
-                        except queue.Empty:
-                            break
-                    self.response_queue.put(response)
-                    print("Cleared queue and added new response")
+                # If no match or no command_id, put in general queue
+                self.response_queue.put(response, block=False)
+                print(f"Added response to general queue: {type(response)}")
+            except queue.Full:
+                # If queue is full, clear it and add the new response
+                while not self.response_queue.empty():
+                    try:
+                        self.response_queue.get_nowait()
+                    except queue.Empty:
+                        break
+                self.response_queue.put(response)
+                print("Cleared queue and added new response")
 
         except Exception as e:
             print(f"Error handling response: {e}")
@@ -537,10 +513,8 @@ class PicarXBridge:
 
 
 # Create a global bridge instance
-bridge = PicarXBridge()
+bt_client = BTClient()
 
-
-# Rest of the code remains the same...
 @app.route('/')
 def index():
     """Serve the composite HTML page that includes both controllers"""
@@ -577,7 +551,6 @@ def wifi_index():
 
 @app.route('/telemetry-fragment')
 def telemetry_fragment():
-    """Serve the telemetry fragment HTML"""
     try:
         with open(os.path.join(app.static_folder, 'telemetry_fragment.html'), 'r') as f:
             content = f.read()
@@ -587,35 +560,24 @@ def telemetry_fragment():
         print(f"Error reading telemetry fragment: {e}")
         return "<div>Telemetry fragment not found</div>"
 
-
-# Add this route to serve our initialization script
 @app.route('/scripts/initialize-controllers.js')
 def initialize_controllers():
-    """Serve the script to initialize the controllers after HTMX load"""
     return send_from_directory('static/scripts', 'initialize-controllers.js')
-
-@app.route('/scripts/telemetry.js')
-def serve_telemetry_js():
-    """Serve the script to initialize the controllers after HTMX load"""
-    return send_from_directory('static/scripts', 'telemetry.js')
-
 
 @app.route('/stacks.min.css')
 def serve_stacks_css():
-    """Serve the Stacks CSS file if locally hosted"""
     return send_from_directory('static/css', 'stacks.min.css')
 
 
 @app.route('/connect', methods=['POST'])
 def connect():
-    """Connect to the Raspberry Pi"""
     data = request.json
     bt_address = data.get('bt_address')
 
     if not bt_address:
         return jsonify({"status": "error", "message": "No Bluetooth address provided"}), 400
 
-    success = bridge.connect_to_pi(bt_address)
+    success = bt_client.connect_to_pi(bt_address)
 
     if success:
         return jsonify({"status": "success", "message": "Connected to Raspberry Pi"})
@@ -626,34 +588,31 @@ def connect():
 @app.route('/disconnect', methods=['POST'])
 def disconnect():
     """Disconnect from the Raspberry Pi"""
-    bridge.disconnect()
+    bt_client.disconnect()
     return jsonify({"status": "success", "message": "Disconnected from Raspberry Pi"})
 
 
 @app.route('/command/<cmd>', methods=['POST'])
 def execute_command(cmd):
     """Forward commands to the Raspberry Pi"""
-    if not bridge.connected:
+    if not bt_client.connected:
         return jsonify({"status": "error", "message": "Not connected to Raspberry Pi"}), 400
 
-    # Get parameters from query string or JSON body
     params = {}
     if request.is_json:
         params = request.json
     else:
-        # Get angle from query params for turn commands
         if cmd in ['left', 'right']:
             angle = request.args.get('angle')
             if angle:
                 params['angle'] = angle
-        # Get speed for speed command
+        # TODO: use this as a percent of the max at 50?
         elif cmd == 'set_speed':
             speed = request.args.get('speed')
             if speed:
                 params['speed'] = float(speed)
 
-    # Send the command to the Pi with default timeout
-    response = bridge.send_command('command', cmd, params)
+    response = bt_client.send_command('command', cmd, params)
 
     print(f"Command {cmd} response: {response}")
     return jsonify(response)
@@ -662,21 +621,21 @@ def execute_command(cmd):
 @app.route('/status', methods=['GET'])
 def get_status():
     """Get the current status of the PicarX"""
-    if not bridge.connected:
+    if not bt_client.connected:
         return jsonify({"status": "error", "message": "Not connected to Raspberry Pi"}), 400
 
-    response = bridge.send_command('status', '')
+    response = bt_client.send_command('status', '')
     return jsonify(response)
 
 
 @app.route('/telemetry', methods=['GET'])
 def get_telemetry():
     """Get all telemetry data from the PicarX"""
-    if not bridge.connected:
+    if not bt_client.connected:
         return jsonify({"status": "error", "message": "Not connected to Raspberry Pi"}), 400
 
     # Increase timeout for all telemetry data
-    response = bridge.send_command('telemetry', 'all', use_cache=True, timeout=15)
+    response = bt_client.send_command('telemetry', 'all', use_cache=True, timeout=15)
     print(f"Telemetry response: {response}")
     return jsonify(response)
 
@@ -684,26 +643,25 @@ def get_telemetry():
 @app.route('/telemetry/battery', methods=['GET'])
 def get_battery():
     """Get battery information from the PicarX"""
-    if not bridge.connected:
+    if not bt_client.connected:
         return jsonify({"status": "error", "message": "Not connected to Raspberry Pi"}), 400
 
     # Increase timeout for battery data
-    response = bridge.send_command('telemetry', 'battery', use_cache=True, timeout=5)
+    response = bt_client.send_command('telemetry', 'battery', use_cache=True, timeout=5)
     return jsonify(response)
 
 
 @app.route('/telemetry/temperature', methods=['GET'])
 def get_temperature():
     """Get CPU temperature from the PicarX"""
-    if not bridge.connected:
+    if not bt_client.connected:
         return jsonify({"status": "error", "message": "Not connected to Raspberry Pi"}), 400
 
     # Increase timeout for temperature data
-    response = bridge.send_command('telemetry', 'temperature', use_cache=True, timeout=5)
+    response = bt_client.send_command('telemetry', 'temperature', use_cache=True, timeout=5)
     return jsonify(response)
 
 
-# Run the server if executed directly
 if __name__ == '__main__':
     try:
         port = 8080
@@ -712,4 +670,4 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         print("\nShutting down client bridge...")
     finally:
-        bridge.disconnect()
+        bt_client.disconnect()
