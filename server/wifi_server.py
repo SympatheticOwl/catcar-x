@@ -287,3 +287,23 @@ class WifiServer:
         # Stop the event loop
         self.manager.loop.call_soon_threadsafe(self.manager.loop.stop)
         self.manager.thread.join(timeout=5)  # Add timeout to prevent hanging
+
+
+# for running directly
+if __name__ == "__main__":
+    try:
+        commands = Commands()
+
+        server = WifiServer(commands)
+        print("Server running. Press Ctrl+C to exit.")
+
+        while True:
+            time.sleep(1)
+
+    except KeyboardInterrupt:
+        print("\nShutting down server...")
+    except Exception as e:
+        print(f"Error: {e}")
+    finally:
+        if 'server' in locals():
+            server.cleanup()
