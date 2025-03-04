@@ -1,7 +1,9 @@
+import collections
 import os
 import re
 import subprocess
 import time
+from robot_hat import ADC
 
 
 class Telemetry:
@@ -18,11 +20,27 @@ class Telemetry:
             battery_path (str, optional): Path to battery information if using a specific
                                          battery module/HAT with its own monitoring interface.
         """
+        self.battery_adc = ADC(4)
         self.battery_path = battery_path
         self.last_cpu_temp = 0
         self.last_battery_level = None
         self.last_update_time = 0
         self.update_interval = 5  # Update readings every 5 seconds
+
+        self.MAX_VOLTAGE = 8.4  # Fully charged 2S Li-ion
+        self.MIN_VOLTAGE = 6.0  # Over-discharge protection at 6.0V
+        self.BATTERY_CAPACITY_MAH = 2000  # 2000mAh as specified
+        self.SCALING_FACTOR = 3  # May need calibration
+        # For time remaining estimation
+        self.voltage_history = collections.deque(maxlen=60)  # Store last minute of readings
+        self.current_draw_estimates = {
+            'idle': 100,  # mA - estimate when robot is stationary
+            'moving': 500,  # mA - estimate when moving (no load)
+            'heavy_load': 1000  # mA - estimate under heavy load (climbing, carrying)
+        }
+
+        # Default current usage pattern - can be updated based on robot state
+        self.current_usage_mode = 'idle'
 
     def _should_update(self):
         """Check if values should be updated based on time interval"""
@@ -59,74 +77,6 @@ class Telemetry:
             except Exception as e:
                 print(f"Error getting CPU temperature via vcgencmd: {e}")
                 return self.last_cpu_temp or 0
-
-    def get_battery_level(self):
-        """
-        Get the current battery level if available.
-
-        Returns:
-            dict: Dictionary containing battery metrics:
-                - percentage (float): Battery level percentage (0-100)
-                - voltage (float): Battery voltage
-                - is_charging (bool): Whether the battery is currently charging
-                - time_remaining (float): Estimated time remaining in hours (if available)
-        """
-        if not self._should_update() and self.last_battery_level is not None:
-            return self.last_battery_level
-
-        # Default response if no battery monitoring is available
-        battery_info = {
-            "percentage": None,
-            "voltage": None,
-            "is_charging": None,
-            "time_remaining": None,
-            "available": False
-        }
-
-        # Try to read battery info based on what's available on the system
-        try:
-            # If using a UPS HAT or battery module with direct path
-            if self.battery_path and os.path.exists(self.battery_path):
-                with open(self.battery_path, 'r') as f:
-                    data = f.read().strip()
-                    # Parse data based on the specific battery module format
-                    # This will need to be customized for specific hardware
-                    # Example assuming a CSV format: percentage,voltage,is_charging
-                    parts = data.split(',')
-                    if len(parts) >= 3:
-                        battery_info["percentage"] = float(parts[0])
-                        battery_info["voltage"] = float(parts[1])
-                        battery_info["is_charging"] = parts[2].lower() == 'true'
-                        battery_info["available"] = True
-            else:
-                # Try to use i2c interface for common battery modules like INA219
-                # This requires additional setup and may need to be adapted
-                try:
-                    import board
-                    import adafruit_ina219
-
-                    i2c = board.I2C()
-                    ina219 = adafruit_ina219.INA219(i2c)
-
-                    voltage = ina219.bus_voltage + ina219.shunt_voltage
-                    # Simple estimation - will need calibration for actual battery
-                    # Assuming Li-ion battery with voltage range 3.2V (0%) to 4.2V (100%)
-                    percentage = max(0, min(100, (voltage - 3.2) / (4.2 - 3.2) * 100))
-
-                    battery_info["voltage"] = round(voltage, 2)
-                    battery_info["percentage"] = round(percentage, 1)
-                    battery_info["is_charging"] = ina219.current > 0  # Positive current = charging
-                    battery_info["available"] = True
-
-                except Exception as e:
-                    # If INA219 is not available, try other methods
-                    print(f"INA219 not available: {e}")
-                    pass
-        except Exception as e:
-            print(f"Error getting battery info: {e}")
-
-        self.last_battery_level = battery_info
-        return battery_info
 
     def get_system_load(self):
         """
@@ -174,6 +124,98 @@ class Telemetry:
             print(f"Error getting system info: {e}")
 
         return system_info
+
+    def get_battery_voltage(self):
+        raw_voltage = self.battery_adc.read_voltage()
+        scaling_factor = 3  # Typical for 2S LiPo battery monitoring, may need adjustment
+        battery_voltage = raw_voltage * scaling_factor
+        return battery_voltage
+
+    def estimate_battery_percentage(self, voltage):
+        if voltage >= self.MAX_VOLTAGE:
+            return 100
+        elif voltage <= self.MIN_VOLTAGE:
+            return 0
+        else:
+            percentage = ((voltage - self.MIN_VOLTAGE) / (self.MAX_VOLTAGE - self.MIN_VOLTAGE)) * 100
+            return round(percentage, 1)
+
+    def set_usage_mode(self, mode):
+        """Update the current usage mode to improve time estimation"""
+        if mode in self.current_draw_estimates:
+            self.current_usage_mode = mode
+            return True
+        return False
+
+    def estimate_time_remaining(self, voltage, percentage):
+        # Add current voltage to history
+        self.voltage_history.append((time.time(), voltage))
+
+        # Method 1: Based on voltage discharge rate
+        if len(self.voltage_history) >= 10:  # Need some history for discharge rate
+            oldest = self.voltage_history[0]
+            newest = self.voltage_history[-1]
+            time_diff_hours = (newest[0] - oldest[0]) / 3600
+
+            if time_diff_hours > 0.01:  # Ensure we have enough time difference
+                voltage_diff = oldest[1] - newest[1]
+
+                if voltage_diff > 0:  # Discharging
+                    discharge_rate = voltage_diff / time_diff_hours  # V/hour
+                    voltage_remaining = voltage - self.MIN_VOLTAGE
+                    hours_remaining_voltage = voltage_remaining / discharge_rate
+
+                    # Method 2: Based on battery percentage and current draw
+                    current_draw = self.current_draw_estimates[self.current_usage_mode]
+                    capacity_remaining_mah = (percentage / 100) * self.BATTERY_CAPACITY_MAH
+                    hours_remaining_current = capacity_remaining_mah / current_draw
+
+                    # Weighted average of both methods (favor the voltage-based one)
+                    hours_remaining = (hours_remaining_voltage * 0.7) + (hours_remaining_current * 0.3)
+
+                    hours = int(hours_remaining)
+                    minutes = int((hours_remaining - hours) * 60)
+
+                    return f"{hours}h {minutes}m ({self.current_usage_mode} mode)"
+
+                return "Charging or stable"
+
+        # Fallback method when discharge rate can't be calculated
+        current_draw = self.current_draw_estimates[self.current_usage_mode]
+        capacity_remaining_mah = (percentage / 100) * self.BATTERY_CAPACITY_MAH
+        hours_remaining = capacity_remaining_mah / current_draw
+
+        hours = int(hours_remaining)
+        minutes = int((hours_remaining - hours) * 60)
+
+        return f"{hours}h {minutes}m (estimated based on {self.current_usage_mode} mode)"
+
+    def get_battery_level(self):
+        """
+        Get the current battery level if available.
+
+        Returns:
+            dict: Dictionary containing battery metrics:
+                - percentage (float): Battery level percentage (0-100)
+                - voltage (float): Battery voltage
+                - is_charging (bool): Whether the battery is currently charging
+                - time_remaining (float): Estimated time remaining in hours (if available)
+        """
+        if not self._should_update() and self.last_battery_level is not None:
+            return self.last_battery_level
+
+        # Default response if no battery monitoring is available
+        voltage = self.get_battery_voltage()
+        percentage = self.estimate_battery_percentage(voltage)
+        battery_info = {
+            "percentage": percentage,
+            "voltage": voltage,
+            "is_charging": None,
+            "time_remaining": self.estimate_time_remaining(voltage, percentage),
+        }
+
+        self.last_battery_level = battery_info
+        return battery_info
 
     def get_all_telemetry(self):
         """
