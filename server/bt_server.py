@@ -148,7 +148,7 @@ class BTServer:
             traceback.print_exc()
             return False
 
-    def send_chunked_response(self, data, command_id=None, chunk_size=1024):
+    def send_chunked_response(self, data, command_id=None, chunk_size=250000):
         if not command_id:
             command_id = "server_" + str(int(time.time()))
 

@@ -33,6 +33,7 @@ class Telemetry:
         self.SCALING_FACTOR = 3  # May need calibration
         # For time remaining estimation
         self.voltage_history = collections.deque(maxlen=60)  # Store last minute of readings
+        self.charging_threshold = 0.005  # Voltage increase per minute that indicates charging
         self.current_draw_estimates = {
             'idle': 100,  # mA - estimate when robot is stationary
             'moving': 500,  # mA - estimate when moving (no load)
@@ -190,6 +191,28 @@ class Telemetry:
 
         return f"{hours}h {minutes}m (estimated based on {self.current_usage_mode} mode)"
 
+    def is_battery_charging(self):
+        if len(self.voltage_history) < 10:  # Need some history to determine
+            return "Unknown - gathering data"
+
+        # Calculate voltage trend
+        oldest = self.voltage_history[0]
+        newest = self.voltage_history[-1]
+        time_diff_minutes = (newest[0] - oldest[0]) / 60  # Convert to minutes
+
+        if time_diff_minutes < 0.5:  # Need at least 30 seconds of data
+            return "Unknown - insufficient data"
+
+        voltage_change = newest[1] - oldest[1]
+        voltage_change_per_minute = voltage_change / time_diff_minutes
+
+        if voltage_change_per_minute >= self.charging_threshold:
+            return True
+        elif voltage_change_per_minute <= -self.charging_threshold:
+            return False  # Discharging
+        else:
+            return "Stable"  # Voltage stable, neither charging nor discharging significantly
+
     def get_battery_level(self):
         """
         Get the current battery level if available.
@@ -210,7 +233,7 @@ class Telemetry:
         battery_info = {
             "percentage": percentage,
             "voltage": voltage,
-            "is_charging": None,
+            "is_charging": self.is_battery_charging(),
             "time_remaining": self.estimate_time_remaining(voltage, percentage),
         }
 
