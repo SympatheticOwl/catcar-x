@@ -35,25 +35,8 @@ os.environ['MPLBACKEND'] = 'Agg'  # Force matplotlib to use Agg backend
 
 class CommandManager:
     def __init__(self, commands: Commands):
-        self.loop = asyncio.new_event_loop()
         self.commands = commands
-        self.thread = threading.Thread(target=self._run_event_loop, daemon=True)
-        self.thread.start()
 
-    def _run_event_loop(self):
-        asyncio.set_event_loop(self.loop)
-
-        self.loop.run_until_complete(self._initialize_commands())
-        self.loop.run_forever()
-
-    async def _initialize_commands(self):
-        """Initialize all monitoring tasks"""
-        self.commands.state.ultrasonic_task = self.loop.create_task(
-            self.commands.object_system.ultrasonic_monitoring())
-        self.commands.state.cliff_task = self.loop.create_task(
-            self.commands.object_system.cliff_monitoring())
-        self.commands.state.pos_track_task = self.loop.create_task(
-            self.commands.object_system.px.continuous_position_tracking())
 
     def cleanup(self):
         """Cleanup function to stop all tasks and the event loop"""
@@ -61,10 +44,6 @@ class CommandManager:
             if self.commands.state.vision_task:
                 self.commands.stop_vision()
             self.commands.cancel_movement()
-
-        self.loop.call_soon_threadsafe(self.loop.stop)
-        self.thread.join(timeout=5)
-
 
 class BTServer:
     def __init__(self, commands: Commands):
@@ -120,14 +99,9 @@ class BTServer:
                 response = self.handle_command(cmd, params)
             elif endpoint == 'status':
                 response = self.handle_status()
-            elif endpoint == 'world-state':
-                response = self.handle_world_state()
-            elif endpoint == 'visualization':
-                response = self.handle_visualization()
             elif endpoint == 'telemetry':
                 response = self.handle_telemetry(cmd, command_id)
             elif endpoint == 'ping':
-                # Handle ping command for connection testing
                 response = json.dumps({
                     "status": "success",
                     "message": "pong",
@@ -175,7 +149,7 @@ class BTServer:
 
     def send_response(self, response):
         try:
-            print(f"Sending response: {response[:100]}...")
+            print(f"Sending response: {response}...")
 
             self.server.send(response)
 
@@ -290,7 +264,7 @@ class BTServer:
                     self.manager.commands.cancel_movement()
 
                     if self.manager.commands.state.movement_task:
-                        self.manager.loop.call_soon_threadsafe(self.manager.commands.state.movement_task.cancel)
+                        self.manager.commands.state.movement_task.cancel()
                         self.manager.commands.state.movement_task = None
                 except Exception as e:
                     print(f"Stop movement error: {e}")
@@ -343,51 +317,6 @@ class BTServer:
             "is_moving": bool(self.manager.commands.state.is_moving),
             "speed": float(self.manager.commands.state.speed)
         }, default=numpy_json_encoder)
-
-    def handle_world_state(self):
-        """Handle world-state endpoint"""
-        if not self.manager.commands:
-            return json.dumps({
-                "status": "error",
-                "message": "Server still initializing"
-            })
-
-        return json.dumps({
-            "state": self.manager.commands.world_state()
-        }, default=numpy_json_encoder)
-
-    def handle_visualization(self):
-        """Handle visualization endpoint"""
-        if not self.manager.commands:
-            return json.dumps({
-                "status": "error",
-                "message": "Server still initializing"
-            })
-
-        try:
-            # Get visualization data directly from the world map
-            visualization_data = self.manager.commands.object_system.world_map.visualize()
-
-            if visualization_data.get('visualization') is None:
-                return json.dumps({
-                    "status": "error",
-                    "message": "Failed to generate visualization"
-                })
-
-            return json.dumps({
-                "status": "success",
-                "data": {
-                    "grid_data": visualization_data['grid_data'],
-                    "plot_image": visualization_data['visualization']
-                }
-            }, default=numpy_json_encoder)
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            return json.dumps({
-                "status": "error",
-                "message": str(e)
-            })
 
     def handle_telemetry(self, cmd, command_id):
         """Handle telemetry endpoint requests"""
