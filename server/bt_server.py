@@ -342,7 +342,7 @@ class BTServer:
                 json_response = json.dumps(response, default=numpy_json_encoder)
 
                 # Check if the response is large and needs chunking (e.g., over 1KB)
-                if len(json_response) > 1024:
+                if len(json_response) > 250000:
                     print(f"Telemetry response is large ({len(json_response)} bytes), sending chunked")
                     self.send_chunked_response(json_response, command_id)
                     # Return a placeholder to indicate chunked response is being sent
@@ -356,7 +356,6 @@ class BTServer:
                 return json_response
 
             elif cmd == "battery":
-                # Get just battery information
                 battery_data = self.manager.commands.get_battery_level()
                 return json.dumps({
                     "status": "success",
@@ -365,7 +364,6 @@ class BTServer:
                 }, default=numpy_json_encoder)
 
             elif cmd == "temperature":
-                # Get just CPU temperature
                 temp = self.manager.commands.get_cpu_temperature()
                 return json.dumps({
                     "status": "success",
