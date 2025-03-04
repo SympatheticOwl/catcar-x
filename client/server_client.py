@@ -669,26 +669,6 @@ def get_status():
     return jsonify(response)
 
 
-@app.route('/world-state', methods=['GET'])
-def get_world_state():
-    """Get the current world state of the PicarX"""
-    if not bridge.connected:
-        return jsonify({"status": "error", "message": "Not connected to Raspberry Pi"}), 400
-
-    response = bridge.send_command('world-state', '')
-    return jsonify(response)
-
-
-@app.route('/visualization', methods=['GET'])
-def get_visualization():
-    """Get the visualization of the world map"""
-    if not bridge.connected:
-        return jsonify({"status": "error", "message": "Not connected to Raspberry Pi"}), 400
-
-    response = bridge.send_command('visualization', '')
-    return jsonify(response)
-
-
 @app.route('/telemetry', methods=['GET'])
 def get_telemetry():
     """Get all telemetry data from the PicarX"""
