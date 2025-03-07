@@ -17,7 +17,8 @@ if __name__ == "__main__":
         flask_thread = threading.Thread(
             target=wifi_server.app.run,
             kwargs={
-                'host': "10.0.0.219",  # Use your desired IP address
+                # 'host': "10.0.0.219",  # Use your desired IP address
+                'host': "192.168.0.163",  # Use your desired IP address
                 'port': 8000,
                 'use_reloader': False,  # Important: disable reloader to avoid creating duplicate threads
                 'debug': False,  # Disable debug mode to prevent auto-restarting

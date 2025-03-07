@@ -87,7 +87,8 @@ function initializeTelemetry(container, isBluetooth) {
     if (!container) return;
 
     // Get API base URL based on controller type
-    const apiUrl = isBluetooth ? window.location.origin : 'http://10.0.0.219:8000';
+    // const apiUrl = isBluetooth ? window.location.origin : 'http://10.0.0.219:8000';
+    const apiUrl = isBluetooth ? window.location.origin : 'http://192.168.0.163:8000';
 
     // Find telemetry elements
     const elements = {
