@@ -564,10 +564,6 @@ def telemetry_fragment():
 def initialize_controllers():
     return send_from_directory('static/scripts', 'initialize-controllers.js')
 
-@app.route('/stacks.min.css')
-def serve_stacks_css():
-    return send_from_directory('static/css', 'stacks.min.css')
-
 
 @app.route('/connect', methods=['POST'])
 def connect():
