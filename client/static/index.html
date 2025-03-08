@@ -12,7 +12,11 @@
             font-family: Arial, sans-serif;
             margin: 0;
             padding: 0;
-            background-color: #f5f5f5;
+        }
+
+        body.theme-dark {
+            background-color: var(--black-050);
+            color: white;
         }
 
         .container {
@@ -25,9 +29,17 @@
             text-align: center;
             margin-bottom: 20px;
             padding: 15px;
-            background-color: #fff;
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        body.theme-dark .header {
+            background-color: var(--black-100);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+
+        body:not(.theme-dark) .header {
+            background-color: #fff;
         }
 
         .controllers-container {
@@ -44,13 +56,21 @@
 
         .controller-panel {
             flex: 1;
-            background-color: #fff;
             border-radius: 8px;
             padding: 20px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             min-height: 400px;
             overflow: auto;
             max-height: 800px;
+        }
+
+        body.theme-dark .controller-panel {
+            background-color: var(--black-100);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+
+        body:not(.theme-dark) .controller-panel {
+            background-color: #fff;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
 
         .controller-header {
@@ -59,6 +79,13 @@
             align-items: center;
             margin-bottom: 15px;
             padding-bottom: 10px;
+        }
+
+        body.theme-dark .controller-header {
+            border-bottom: 1px solid var(--black-200);
+        }
+
+        body:not(.theme-dark) .controller-header {
             border-bottom: 1px solid #eee;
         }
 
@@ -76,7 +103,6 @@
 
         .tab-button {
             padding: 10px 20px;
-            background-color: #f0f0f0;
             border: none;
             border-radius: 4px;
             cursor: pointer;
@@ -84,12 +110,31 @@
             transition: background-color 0.2s;
         }
 
-        .tab-button.active {
+        body.theme-dark .tab-button {
+            background-color: var(--black-150);
+            color: white;
+        }
+
+        body:not(.theme-dark) .tab-button {
+            background-color: #f0f0f0;
+            color: inherit;
+        }
+
+        body.theme-dark .tab-button.active {
             background-color: #4a90e2;
             color: white;
         }
 
-        .tab-button:hover:not(.active) {
+        body:not(.theme-dark) .tab-button.active {
+            background-color: #4a90e2;
+            color: white;
+        }
+
+        body.theme-dark .tab-button:hover:not(.active) {
+            background-color: var(--black-200);
+        }
+
+        body:not(.theme-dark) .tab-button:hover:not(.active) {
             background-color: #e0e0e0;
         }
 
@@ -97,34 +142,255 @@
             text-align: center;
             padding: 20px;
             font-style: italic;
+        }
+
+        body.theme-dark .loading {
+            color: var(--black-300);
+        }
+
+        body:not(.theme-dark) .loading {
             color: #666;
         }
 
-        /* Ensure all content is contained within its panel */
         .controller-panel * {
             max-width: 100%;
         }
 
-        /* Fix any conflicting styles from the imported views */
         .controller-panel h1 {
             font-size: 1.5rem;
             margin-top: 0;
         }
 
-        /* Ensure each controller's content is properly scoped */
-        .controller-content {
-            position: relative;
+        body.theme-dark #status,
+        body.theme-dark #bt-status,
+        body.theme-dark #wifi-status {
+            background-color: var(--black-075);
+            border: 1px solid var(--black-150);
         }
 
-        /* Prevent duplicate IDs from causing issues */
-        #bluetooth-controller #status,
-        #wifi-controller #status {
-            /* Override any conflicting styles */
-            margin: 15px 0;
-            border: 1px solid #ddd;
+        body:not(.theme-dark) #status,
+        body:not(.theme-dark) #bt-status,
+        body:not(.theme-dark) #wifi-status {
             background-color: #f9f9f9;
+            border: 1px solid #ddd;
+        }
+
+        #status, #bt-status, #wifi-status {
+            margin: 15px 0;
             padding: 8px 12px;
             border-radius: 4px;
+        }
+
+        .controls {
+            display: grid;
+            grid-template-areas:
+                ".  up  ."
+                "left . right"
+                ".  down  .";
+            gap: 5px;
+            width: 195px;
+            margin: 20px auto;
+        }
+
+        .controls button {
+            width: 60px;
+            height: 60px;
+            font-size: 1.5rem;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        #up {
+            grid-area: up;
+        }
+
+        #left {
+            grid-area: left;
+        }
+
+        #right {
+            grid-area: right;
+        }
+
+        #down {
+            grid-area: down;
+        }
+
+        body.theme-dark .controls button {
+            background-color: #4a90e2;
+            color: white;
+        }
+
+        body:not(.theme-dark) .controls button {
+            background-color: #4a90e2;
+            color: inherit;
+        }
+
+        body.theme-dark .controls button:hover:not(:disabled) {
+            background-color: #2a70c2;
+        }
+
+        body:not(.theme-dark) .controls button:hover:not(:disabled) {
+            background-color: #e0e0e0;
+        }
+
+        body.theme-dark .controls button.active {
+            background-color: #4a90e2;
+            color: white;
+        }
+
+        body:not(.theme-dark) .controls button.active {
+            background-color: #2a70c2;
+            color: white;
+        }
+
+        .connection-panel {
+            margin-bottom: 20px;
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        /* Dark theme adjustment for connection panel */
+        body.theme-dark .connection-panel {
+            background-color: var(--black-075);
+            border: 1px solid var(--black-150);
+        }
+
+        body:not(.theme-dark) .connection-panel {
+            background-color: #f9f9f9;
+            border: 1px solid #ddd;
+        }
+
+        .disconnected {
+            color: var(--red-500);
+            font-weight: bold;
+            margin: 10px 0;
+        }
+
+        .connected {
+            color: var(--green-500);
+            font-weight: bold;
+            margin: 10px 0;
+        }
+
+        .button-row {
+            display: flex;
+            gap: 10px;
+            margin: 15px 0;
+            flex-wrap: wrap;
+        }
+
+        /* Input styling */
+        input[type="text"] {
+            padding: 8px 12px;
+            border-radius: 4px;
+            flex-grow: 1;
+        }
+
+        /* Dark theme adjustment for inputs */
+        body.theme-dark input[type="text"] {
+            background-color: var(--black-075);
+            border: 1px solid var(--black-200);
+            color: white;
+        }
+
+        body:not(.theme-dark) input[type="text"] {
+            background-color: #fff;
+            border: 1px solid #ddd;
+        }
+
+        /* Button styling */
+        .button-row button,
+        #scanEnv,
+        #toggleVideo,
+        #refresh-telemetry {
+            padding: 8px 16px;
+            border-radius: 4px;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        body.theme-dark .button-row button,
+        body.theme-dark #scanEnv,
+        body.theme-dark #toggleVideo,
+        body.theme-dark #refresh-telemetry {
+            background-color: #4a90e2;
+            color: white;
+        }
+
+        body:not(.theme-dark) .button-row button,
+        body:not(.theme-dark) #scanEnv,
+        body:not(.theme-dark) #toggleVideo,
+        body:not(.theme-dark) #refresh-telemetry {
+            background-color: #4a90e2;
+            color: white;
+        }
+
+        body.theme-dark .button-row button:hover:not(:disabled),
+        body.theme-dark #scanEnv:hover:not(:disabled),
+        body.theme-dark #toggleVideo:hover:not(:disabled),
+        body.theme-dark #refresh-telemetry:hover:not(:disabled) {
+            background-color: #3a80d2;
+        }
+
+        body:not(.theme-dark) .button-row button:hover:not(:disabled),
+        body:not(.theme-dark) #scanEnv:hover:not(:disabled),
+        body:not(.theme-dark) #toggleVideo:hover:not(:disabled),
+        body:not(.theme-dark) #refresh-telemetry:hover:not(:disabled) {
+            background-color: #3a80d2;
+        }
+
+        /* Disabled button styling */
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Video container styling */
+        #videoContainer {
+            margin: 20px auto;
+            text-align: center;
+        }
+
+        #videoFeed {
+            max-width: 100%;
+            border-radius: 8px;
+        }
+
+        /* Map container styling */
+        #mapContainer {
+            margin: 20px auto;
+            text-align: center;
+        }
+
+        #mapVisualization {
+            max-width: 100%;
+            margin-top: 10px;
+            border-radius: 8px;
+            color: white
+        }
+
+        /* ASCII map styling */
+        #asciiMap {
+            text-align: left;
+            font-family: monospace;
+            overflow-x: auto;
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        /* Dark theme adjustment for ASCII map */
+        body.theme-dark #asciiMap {
+            background-color: var(--black-075);
+            color: white
+        }
+
+        body:not(.theme-dark) #asciiMap {
+            background-color: #f5f5f5;
+            color: inherit;
         }
 
         /* Custom styling for the range input */
@@ -136,32 +402,60 @@
         }
 
         /* Track styles */
-        input[type=range]::-webkit-slider-runnable-track {
+        body.theme-dark input[type=range]::-webkit-slider-runnable-track {
+            background: var(--black-200);
+        }
+
+        body:not(.theme-dark) input[type=range]::-webkit-slider-runnable-track {
             background: #ddd;
+        }
+
+        input[type=range]::-webkit-slider-runnable-track {
             height: 8px;
             border-radius: 4px;
         }
 
-        input[type=range]::-moz-range-track {
+        body.theme-dark input[type=range]::-moz-range-track {
+            background: var(--black-200);
+        }
+
+        body:not(.theme-dark) input[type=range]::-moz-range-track {
             background: #ddd;
+        }
+
+        input[type=range]::-moz-range-track {
             height: 8px;
             border-radius: 4px;
         }
 
         /* Thumb styles */
+        body.theme-dark input[type=range]::-webkit-slider-thumb {
+            background-color: #4a90e2;
+        }
+
+        body:not(.theme-dark) input[type=range]::-webkit-slider-thumb {
+            background-color: #4a90e2;
+        }
+
         input[type=range]::-webkit-slider-thumb {
             -webkit-appearance: none;
             appearance: none;
             margin-top: -4px; /* Thumb position adjustment */
-            background-color: #4a90e2;
             height: 16px;
             width: 16px;
             border-radius: 50%;
         }
 
+        body.theme-dark input[type=range]::-moz-range-thumb {
+            background-color: #4a90e2;
+        }
+
+        body:not(.theme-dark) input[type=range]::-moz-range-thumb {
+            background-color: #4a90e2;
+        }
+
         input[type=range]::-moz-range-thumb {
             border: none;
-            background-color: #4a90e2;
             height: 16px;
             width: 16px;
             border-radius: 50%;
@@ -172,38 +466,57 @@
             outline: none;
         }
 
-        input[type=range]:focus::-webkit-slider-thumb {
+        body.theme-dark input[type=range]:focus::-webkit-slider-thumb {
+            box-shadow: 0 0 0 3px rgba(0, 149, 255, 0.3);
+        }
+
+        body:not(.theme-dark) input[type=range]:focus::-webkit-slider-thumb {
             box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.3);
         }
 
-        input[type=range]:focus::-moz-range-thumb {
+        body.theme-dark input[type=range]:focus::-moz-range-thumb {
+            box-shadow: 0 0 0 3px rgba(0, 149, 255, 0.3);
+        }
+
+        body:not(.theme-dark) input[type=range]:focus::-moz-range-thumb {
             box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.3);
         }
 
         /* Disabled styles */
-        input[type=range]:disabled::-webkit-slider-runnable-track {
+        body.theme-dark input[type=range]:disabled::-webkit-slider-runnable-track {
+            background: var(--black-100);
+        }
+
+        body:not(.theme-dark) input[type=range]:disabled::-webkit-slider-runnable-track {
             background: #eee;
         }
 
-        input[type=range]:disabled::-moz-range-track {
+        body.theme-dark input[type=range]:disabled::-moz-range-track {
+            background: var(--black-100);
+        }
+
+        body:not(.theme-dark) input[type=range]:disabled::-moz-range-track {
             background: #eee;
         }
 
-        input[type=range]:disabled::-webkit-slider-thumb {
+        body.theme-dark input[type=range]:disabled::-webkit-slider-thumb {
+            background-color: var(--black-300);
+        }
+
+        body:not(.theme-dark) input[type=range]:disabled::-webkit-slider-thumb {
             background-color: #ccc;
         }
 
-        input[type=range]:disabled::-moz-range-thumb {
+        body.theme-dark input[type=range]:disabled::-moz-range-thumb {
+            background-color: var(--black-300);
+        }
+
+        body:not(.theme-dark) input[type=range]:disabled::-moz-range-thumb {
             background-color: #ccc;
         }
     </style>
 </head>
-<body>
-    <script>
-        (function () {
-            document.body.classList.toggle("theme-dark", true);
-        }());
-    </script>
+<body class="theme-dark">
     <div class="container">
         <div class="header">
             <h1>Wireless Controller Interface</h1>
@@ -229,7 +542,7 @@
             <!-- WiFi Controller Panel -->
             <div class="controller-panel" id="wifi-controller">
                 <div class="controller-header">
-                    <h2 class="controller-title">WiFi Control</h2>
+                    <h2 class="controller-title">Wifi Control</h2>
                 </div>
                 <div class="loading" id="wifi-loading">Loading WiFi controller...</div>
                 <div id="wifi-content" hx-get="/wifi" hx-trigger="load" hx-swap="innerHTML" class="controller-content"></div>
@@ -238,6 +551,11 @@
     </div>
 
     <script>
+        // Apply dark theme
+        (function () {
+            document.body.classList.add("theme-dark");
+        }());
+
         // Handle tab switching
         function switchTab(tab) {
             const dualView = document.getElementById('dual-view');
