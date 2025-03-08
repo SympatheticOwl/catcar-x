@@ -9,54 +9,16 @@ import asyncio
 import threading
 from commands import Commands
 
-# allows commands to be run side by side
-class AsyncCommandManager:
-    def __init__(self, commands: Commands):
-        self.loop = asyncio.new_event_loop()
-        self.commands = commands
-        self.thread = threading.Thread(target=self._run_event_loop, daemon=True)
-        self.thread.start()
-
-    def _run_event_loop(self):
-        """Runs the event loop in a separate thread"""
-        asyncio.set_event_loop(self.loop)
-
-        # Initialize monitoring tasks in the event loop
-        # self.loop.run_until_complete(self._initialize_commands())
-        self.loop.run_forever()
-
-    # async def _initialize_commands(self):
-    #     """Initialize all monitoring tasks"""
-    #     self.commands.state.ultrasonic_task = self.loop.create_task(
-    #         self.commands.object_system.ultrasonic_monitoring())
-    #     self.commands.state.cliff_task = self.loop.create_task(
-    #         self.commands.object_system.cliff_monitoring())
-    #     self.commands.state.pos_track_task = self.loop.create_task(
-    #         self.commands.object_system.px.continuous_position_tracking())
-
-    # def run_coroutine(self, coro):
-    #     """Run a coroutine in the event loop"""
-    #     future = asyncio.run_coroutine_threadsafe(coro, self.loop)
-    #     return future.result()
-
-
-# Create Flask app - now it's a standalone object, not within a class method
 app = Flask(__name__)
 
 
 class WifiServer:
     def __init__(self, commands: Commands):
-        # self.manager = AsyncCommandManager(commands)
-
-        self.loop = asyncio.new_event_loop()
         self.commands = commands
-        # self.thread = threading.Thread(target=self._run_event_loop, daemon=True)
-        # self.thread.start()
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
 
-        # Store reference to the global app
         self.app = app
-
-        # Register routes with decorator functions
         self.register_routes()
 
     def register_routes(self):
@@ -199,7 +161,6 @@ class WifiServer:
                 })
 
             elif cmd == "blind":
-                # Create vision task in the event loop
                 self.commands.stop_vision()
                 return jsonify({
                     "status": "success",
@@ -221,7 +182,7 @@ class WifiServer:
             else:
                 return jsonify({
                     "status": "error",
-                    "message": f"Unknown command: {cmd}. Available commands: forward, stop, scan, see"
+                    "message": f"Unknown command: {cmd}"
                 }), 400
 
         except Exception as e:
