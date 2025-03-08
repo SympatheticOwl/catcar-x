@@ -12,7 +12,6 @@ from matplotlib.patches import Patch
 
 from state_handler import State
 
-
 class WorldMap:
     def __init__(self, state: State, grid_size: int = 200, resolution: float = 5.0):
         """
@@ -254,7 +253,7 @@ class WorldMap:
 
     def get_ascii_map(self) -> str:
         """
-        Generate ASCII representation of the map
+        Generate simplified ASCII representation of the map
 
         Returns:
             String representing the grid with car position
@@ -272,11 +271,11 @@ class WorldMap:
             line = ""
             for col in range(self.grid_size):
                 if grid_copy[row, col] == 0:
-                    line += " "  # Empty/unknown
+                    line += "0"  # Empty/unknown
                 elif grid_copy[row, col] == 1:
-                    line += "X"  # Obstacle
+                    line += "1"  # Obstacle
                 elif grid_copy[row, col] == 2:
-                    line += "C"  # Car
+                    line += "#"  # Car
             result += line + "\n"
 
         return result
