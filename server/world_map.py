@@ -3,15 +3,18 @@ import math
 import base64
 import io
 from typing import Dict, List, Tuple, Callable
+
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.colors import LinearSegmentedColormap,ListedColormap
+from matplotlib.patches import Patch
+
 from state_handler import State
 
 
 class WorldMap:
-    def __init__(self, state: State, grid_size: int = 400, resolution: float = 5.0):
+    def __init__(self, state: State, grid_size: int = 200, resolution: float = 5.0):
         """
         Initialize world map grid for object tracking
 
@@ -41,6 +44,10 @@ class WorldMap:
     def clear_grid(self):
         """Reset the grid to all zeros"""
         self.grid = np.zeros((self.grid_size, self.grid_size), dtype=np.uint8)
+        self.scanned_points = []
+
+    def clear_scan_points(self):
+        """Clear only the scan points but preserve the grid"""
         self.scanned_points = []
 
     def polar_to_cartesian(self, angle: float, distance: float) -> Tuple[float, float]:
@@ -223,8 +230,8 @@ class WorldMap:
         Args:
             sensor_func: Async function that takes an angle and returns distance
         """
-        # Clear previous scan data
-        self.clear_grid()
+        # Only clear the scan points but preserve the grid
+        self.clear_scan_points()
 
         # Define scan range and step from state
         scan_range = range(self.__state.scan_range[0],
@@ -284,10 +291,6 @@ class WorldMap:
         Returns:
             Dictionary with grid data and visualization
         """
-        # Create a colormap: 0=white (empty), 1=red (obstacle), 2=green (car)
-        colors = ['white', 'red', 'green']
-        cmap = LinearSegmentedColormap.from_list("world_map", colors, N=3)
-
         # Create a copy of the grid for visualization
         grid_viz = self.grid.copy()
 
@@ -297,6 +300,12 @@ class WorldMap:
 
         # Create plot
         fig, ax = plt.subplots(figsize=(8, 8))
+
+        # Create a custom colormap for better visibility
+        # 0=white (empty), 1=red (obstacle), 2=blue (car)
+        cmap = ListedColormap(['white', 'red', 'blue'])
+
+        # Display the grid
         im = ax.imshow(grid_viz, cmap=cmap, vmin=0, vmax=2)
 
         # Add heading indicator
@@ -304,15 +313,14 @@ class WorldMap:
         dx = 5 * math.cos(heading_rad)
         dy = -5 * math.sin(heading_rad)  # Negative because y-axis is flipped in grid
         ax.arrow(car_col, car_row, dx, dy,
-                 head_width=2, head_length=2, fc='blue', ec='blue')
+                 head_width=2, head_length=2, fc='green', ec='green')
 
         # Add gridlines
         ax.grid(True, color='gray', linestyle='-', linewidth=0.5, alpha=0.3)
 
-        # Add coordinate axes
         # Mark the grid center (0,0 in world coordinates)
         center_row, center_col = self.world_to_grid(0, 0)
-        ax.plot(center_col, center_row, 'bx', markersize=10)
+        ax.plot(center_col, center_row, 'kx', markersize=8)
 
         # Calculate grid for axis labels
         # (show world coordinates, not grid indices)
@@ -330,15 +338,21 @@ class WorldMap:
         ax.set_title(
             f"World Map (Pos: {self.__state.x:.1f}, {self.__state.y:.1f}, Heading: {self.__state.heading:.1f}°)")
 
-        # Add legend
-        cbar = plt.colorbar(im, ax=ax, ticks=[0, 1, 2])
-        cbar.set_ticklabels(['Empty', 'Obstacle', 'Car'])
+        # Create custom legend instead of colorbar
+        legend_elements = [
+            Patch(facecolor='white', edgecolor='gray', label='Empty'),
+            Patch(facecolor='red', edgecolor='gray', label='Obstacle'),
+            Patch(facecolor='blue', edgecolor='gray', label='Car'),
+            Patch(facecolor='green', edgecolor='gray', label='Heading')
+        ]
+        ax.legend(handles=legend_elements, loc='upper right',
+                  bbox_to_anchor=(1.0, 1.0), fontsize='small')
 
         # Return as base64 if requested
         img_data = None
         if return_image:
             buf = io.BytesIO()
-            plt.savefig(buf, format='png')
+            plt.savefig(buf, format='png', bbox_inches='tight')
             buf.seek(0)
             img_data = base64.b64encode(buf.read()).decode('utf-8')
             plt.close(fig)
