@@ -1,379 +1,371 @@
 import numpy as np
 import math
+import base64
+import io
+from typing import Dict, List, Tuple, Callable, Optional, Any
+# Set matplotlib to use non-interactive Agg backend
 import matplotlib
-# Force matplotlib to use non-interactive backend
+
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import io
-import base64
 from matplotlib.colors import LinearSegmentedColormap
-from typing import Callable, List, Tuple, Optional, Any, Awaitable
-import asyncio
-
 from state_handler import State
 
 
 class WorldMap:
-    def __init__(self, state: State, grid_size: int = 100, cell_size: float = 1.0):
+    def __init__(self, state: State, grid_size: int = 101, grid_resolution: float = 2.0):
         """
-        Initialize the world map
+        Initialize world map grid for object tracking
 
         Args:
-            state: State object containing robot's status
-            grid_size: Size of the grid (grid_size x grid_size)
-            cell_size: Size of each grid cell in cm
+            state: Shared state object
+            grid_size: Size of the grid (odd number recommended)
+            grid_resolution: Resolution of grid in cm per cell
         """
-        self.state = state
+        self.__state = state
         self.grid_size = grid_size
-        self.cell_size = cell_size
+        self.grid_resolution = grid_resolution
 
-        # Create grid with default unknown state (-1)
-        # 0 = Free space, 1 = Occupied, -1 = Unknown
-        self.grid = np.ones((grid_size, grid_size)) * -1
+        # Ensure grid_size is odd so car is at exact center
+        if self.grid_size % 2 == 0:
+            self.grid_size += 1
 
-        # Center of the grid is the origin (0,0)
-        self.origin = grid_size // 2
+        # Initialize grid (0 = unknown, 1 = free space, 2 = object)
+        self.grid = np.zeros((self.grid_size, self.grid_size), dtype=np.uint8)
 
-        # Store detected objects with their world coordinates
-        self.objects = []
+        # Center of the grid (coordinates of the car)
+        self.center = self.grid_size // 2
 
-        # Create custom colormap: unknown=grey, free=white, occupied=black
-        self.cmap = LinearSegmentedColormap.from_list('worldmap_cmap',
-                                                      [(0.5, 0.5, 0.5),  # Unknown (grey)
-                                                       (1, 1, 1),  # Free (white)
-                                                       (0, 0, 0)])  # Occupied (black)
-        self.norm = plt.Normalize(-1, 1)
+        # Tracking for latest scan data
+        self.last_scan_points = []
+        self.detected_objects = []
 
-    def grid_to_world(self, grid_x: int, grid_y: int) -> Tuple[float, float]:
-        """
-        Convert grid coordinates to world coordinates
+        # The car's representation on the grid
+        self.car_length = 20  # cm
+        self.car_width = 15  # cm
 
-        Args:
-            grid_x: X coordinate in grid
-            grid_y: Y coordinate in grid
-
-        Returns:
-            (world_x, world_y): Coordinates in world space (cm)
-        """
-        world_x = (grid_x - self.origin) * self.cell_size
-        world_y = (grid_y - self.origin) * self.cell_size
-        return world_x, world_y
+        # Cell markers
+        self.UNKNOWN = 0
+        self.FREE = 1
+        self.OBJECT = 2
+        self.CLIFF = 3
+        self.CAR = 4
 
     def world_to_grid(self, world_x: float, world_y: float) -> Tuple[int, int]:
         """
-        Convert world coordinates to grid coordinates
+        Convert world coordinates (cm) to grid coordinates
 
         Args:
             world_x: X coordinate in world space (cm)
             world_y: Y coordinate in world space (cm)
 
         Returns:
-            (grid_x, grid_y): Coordinates in grid
+            Tuple of grid coordinates (row, col)
         """
-        grid_x = int(round(world_x / self.cell_size)) + self.origin
-        grid_y = int(round(world_y / self.cell_size)) + self.origin
+        # Calculate grid coordinates (car is at center)
+        grid_x = self.center + int(world_x / self.grid_resolution)
+        grid_y = self.center - int(world_y / self.grid_resolution)  # Y-axis flipped in grid
 
-        # Ensure coordinates are within grid bounds
+        # Constrain to grid boundaries
         grid_x = max(0, min(grid_x, self.grid_size - 1))
         grid_y = max(0, min(grid_y, self.grid_size - 1))
 
-        return grid_x, grid_y
+        return grid_y, grid_x  # Return as (row, col)
 
-    def polar_to_cartesian(self, angle: float, distance: float) -> Tuple[float, float]:
+    def grid_to_world(self, row: int, col: int) -> Tuple[float, float]:
         """
-        Convert polar coordinates (angle, distance) to cartesian coordinates
-        relative to the robot's current position and heading
+        Convert grid coordinates to world coordinates (cm)
 
         Args:
-            angle: Angle in degrees (relative to robot's front, where 0 is forward)
-            distance: Distance in cm
+            row: Row in grid
+            col: Column in grid
 
         Returns:
-            (x, y): Cartesian coordinates (cm) in world space
+            Tuple of world coordinates (x, y)
         """
-        # First, we need to understand the two coordinate systems:
-        # 1. Robot heading (0° is east, 90° is north)
-        # 2. Sensor angle (0° is robot's front, positive clockwise)
-
-        # Calculate the absolute angle in world coordinates
-        # We need to add the sensor angle to the robot's heading,
-        # but the sign may need to be flipped because of differences in convention
-
-        # Try flipping the sensor angle sign
-        absolute_angle = (self.state.heading - angle) % 360
-
-        # Convert to radians
-        angle_rad = math.radians(absolute_angle)
-
-        # Standard polar to Cartesian conversion
-        x_offset = distance * math.cos(angle_rad)
-        y_offset = distance * math.sin(angle_rad)
-
-        # Add robot's position
-        world_x = self.state.x + x_offset
-        world_y = self.state.y + y_offset
+        world_x = (col - self.center) * self.grid_resolution
+        world_y = (self.center - row) * self.grid_resolution
 
         return world_x, world_y
 
-    def update_grid_with_ray(self, start_x: float, start_y: float, end_x: float, end_y: float) -> None:
+    def add_object_point(self, angle: float, distance: float):
         """
-        Update grid using ray casting from start to end point
+        Add a detected object point to the grid
 
         Args:
-            start_x, start_y: Start coordinates in world space (cm)
-            end_x, end_y: End coordinates in world space (cm)
+            angle: Angle in degrees (0 is front, positive is right)
+            distance: Distance in cm
         """
-        # Convert to grid coordinates
-        start_grid_x, start_grid_y = self.world_to_grid(start_x, start_y)
-        end_grid_x, end_grid_y = self.world_to_grid(end_x, end_y)
+        # Convert to world coordinates from polar (relative to car)
+        heading_rad = math.radians(self.__state.heading)
+        angle_rad = math.radians(angle)
+        total_angle = heading_rad + angle_rad
 
-        # Use Bresenham's line algorithm to get all cells along the ray
-        line_points = self._bresenham_line(start_grid_x, start_grid_y, end_grid_x, end_grid_y)
+        # Account for ultrasonic sensor position offset
+        sensor_x = self.__state.ULTRASONIC_OFFSET_X
+        sensor_y = self.__state.ULTRASONIC_OFFSET_Y
 
-        # Mark all cells along the ray as free except the last one
-        for i, (grid_x, grid_y) in enumerate(line_points):
-            # Skip if out of bounds
-            if not (0 <= grid_x < self.grid_size and 0 <= grid_y < self.grid_size):
-                continue
+        # Calculate object position relative to car
+        rel_x = sensor_x + distance * math.cos(total_angle)
+        rel_y = sensor_y + distance * math.sin(total_angle)
 
-            if i == len(line_points) - 1:
-                # Last point is occupied
-                self.grid[grid_y, grid_x] = 1
-            else:
-                # Path to obstacle is free space
-                self.grid[grid_y, grid_x] = 0
+        # Convert to absolute world coordinates
+        world_x = self.__state.x + rel_x
+        world_y = self.__state.y + rel_y
 
-    def _bresenham_line(self, x0: int, y0: int, x1: int, y1: int) -> List[Tuple[int, int]]:
+        # Convert to grid coordinates and mark as object
+        grid_row, grid_col = self.world_to_grid(world_x, world_y)
+        self.grid[grid_row, grid_col] = self.OBJECT
+
+        # Add to detected points
+        self.last_scan_points.append({
+            'angle': angle,
+            'distance': distance,
+            'world_x': world_x,
+            'world_y': world_y,
+            'grid_row': grid_row,
+            'grid_col': grid_col
+        })
+
+    def interpolate_between_points(self):
         """
-        Implementation of Bresenham's line algorithm
+        Interpolate objects between detected points with similar distances
+        """
+        if len(self.last_scan_points) < 2:
+            return
+
+        # Sort points by angle
+        sorted_points = sorted(self.last_scan_points, key=lambda p: p['angle'])
+
+        # Interpolate between consecutive points
+        for i in range(len(sorted_points) - 1):
+            p1 = sorted_points[i]
+            p2 = sorted_points[i + 1]
+
+            # Check if points are close enough in angle and distance to be considered same object
+            angle_diff = abs(p2['angle'] - p1['angle'])
+            distance_diff = abs(p2['distance'] - p1['distance'])
+
+            # If points are close enough, interpolate between them
+            if angle_diff < 15 and distance_diff < 20:  # 15 degrees and 20cm thresholds
+                row1, col1 = p1['grid_row'], p1['grid_col']
+                row2, col2 = p2['grid_row'], p2['grid_col']
+
+                # Use Bresenham's line algorithm to interpolate
+                for point in self.bresenham_line(row1, col1, row2, col2):
+                    row, col = point
+                    if 0 <= row < self.grid_size and 0 <= col < self.grid_size:
+                        self.grid[row, col] = self.OBJECT
+
+    def bresenham_line(self, row1: int, col1: int, row2: int, col2: int) -> List[Tuple[int, int]]:
+        """
+        Bresenham's line algorithm for grid interpolation
 
         Args:
-            x0, y0: Starting point
-            x1, y1: Ending point
+            row1, col1: Starting point
+            row2, col2: Ending point
 
         Returns:
-            List of points (x, y) along the line
+            List of points (row, col) along the line
         """
         points = []
-        dx = abs(x1 - x0)
-        dy = abs(y1 - y0)
-        sx = 1 if x0 < x1 else -1
-        sy = 1 if y0 < y1 else -1
-        err = dx - dy
+
+        dx = abs(col2 - col1)
+        dy = -abs(row2 - row1)
+
+        sx = 1 if col1 < col2 else -1
+        sy = 1 if row1 < row2 else -1
+
+        err = dx + dy
 
         while True:
-            points.append((x0, y0))
-            if x0 == x1 and y0 == y1:
+            points.append((row1, col1))
+
+            if row1 == row2 and col1 == col2:
                 break
+
             e2 = 2 * err
-            if e2 > -dy:
-                if x0 == x1:
+
+            if e2 >= dy:
+                if col1 == col2:
                     break
-                err -= dy
-                x0 += sx
-            if e2 < dx:
-                if y0 == y1:
+                err += dy
+                col1 += sx
+
+            if e2 <= dx:
+                if row1 == row2:
                     break
                 err += dx
-                y0 += sy
+                row1 += sy
 
         return points
 
-    async def scan_surroundings(self, sensor_func: Callable[[float], Awaitable[float]],
-                                angle_range: Tuple[int, int] = None,
-                                angle_step: int = None) -> None:
+    def mark_free_space(self):
         """
-        Scan surroundings using the ultrasonic sensor
+        Mark space between car and detected objects as free
+        """
+        car_row, car_col = self.world_to_grid(self.__state.x, self.__state.y)
+
+        # For each object point
+        for point in self.last_scan_points:
+            obj_row, obj_col = point['grid_row'], point['grid_col']
+
+            # Interpolate between car and object
+            for row, col in self.bresenham_line(car_row, car_col, obj_row, obj_col)[:-1]:
+                if 0 <= row < self.grid_size and 0 <= col < self.grid_size:
+                    if self.grid[row, col] == self.UNKNOWN:
+                        self.grid[row, col] = self.FREE
+
+    async def scan_surroundings(self, sensor_func: Callable):
+        """
+        Scan surroundings and update world map
 
         Args:
-            sensor_func: Async function that takes an angle and returns a distance
-            angle_range: Range of angles to scan (min, max)
-            angle_step: Step size for scanning in degrees
+            sensor_func: Async function that measures distance at a given angle
         """
-        # Use default values from state if not provided
-        if angle_range is None:
-            angle_range = self.state.scan_range
-        if angle_step is None:
-            angle_step = self.state.scan_step
+        # Clear last scan points
+        self.last_scan_points = []
 
-        # Current robot position in world coordinates
-        robot_x, robot_y = self.state.x, self.state.y
+        # Scan range
+        scan_range = range(self.__state.scan_range[0], self.__state.scan_range[1] + 1, self.__state.scan_step)
 
-        # Scan surroundings
-        for angle in range(angle_range[0], angle_range[1] + 1, angle_step):
-            # Get distance reading from sensor
+        # Perform scan and add points to the map
+        for angle in scan_range:
             distance = await sensor_func(angle)
+            if distance and distance < 300:  # Valid reading
+                self.add_object_point(angle, distance)
 
-            # Convert to world coordinates
-            if distance < 300:  # Valid reading (not too far)
-                object_x, object_y = self.polar_to_cartesian(angle, distance)
+        # Interpolate between points and mark free space
+        self.interpolate_between_points()
+        self.mark_free_space()
 
-                # Store object
-                self.objects.append((object_x, object_y))
+        # Add car to the grid
+        self.update_car_position()
 
-                # Update grid with ray from robot to object
-                self.update_grid_with_ray(robot_x, robot_y, object_x, object_y)
-            else:
-                # If no object detected, mark maximum range as free space
-                max_dist = 50  # Only mark up to 50cm as definitely free
-                far_x, far_y = self.polar_to_cartesian(angle, max_dist)
-
-                # Update grid with ray from robot to maximum range
-                self.update_grid_with_ray(robot_x, robot_y, far_x, far_y)
-
-    def visualize(self, return_image: bool = True) -> dict:
+    def update_car_position(self):
         """
-        Visualize the world map
+        Update car's position in the grid based on current state
+        """
+        # Get car's current grid position
+        car_row, car_col = self.world_to_grid(self.__state.x, self.__state.y)
 
-        Args:
-            return_image: If True, return base64-encoded PNG image (default: True)
+        # Calculate car's bounding box in grid
+        car_length_cells = int(self.car_length / self.grid_resolution)
+        car_width_cells = int(self.car_width / self.grid_resolution)
+
+        # Calculate orientation
+        heading_rad = math.radians(self.__state.heading)
+        cos_h = math.cos(heading_rad)
+        sin_h = math.sin(heading_rad)
+
+        # Calculate corners of car bounding box (simplified)
+        half_length = car_length_cells // 2
+        half_width = car_width_cells // 2
+
+        for dy in range(-half_width, half_width + 1):
+            for dx in range(-half_length, half_length + 1):
+                # Rotate coordinates based on heading
+                rot_dx = dx * cos_h - dy * sin_h
+                rot_dy = dx * sin_h + dy * cos_h
+
+                # Calculate grid position
+                grid_row = int(car_row + rot_dy)
+                grid_col = int(car_col + rot_dx)
+
+                # Check if within grid bounds
+                if 0 <= grid_row < self.grid_size and 0 <= grid_col < self.grid_size:
+                    # Only mark as car if not already an object
+                    if self.grid[grid_row, grid_col] != self.OBJECT:
+                        self.grid[grid_row, grid_col] = self.CAR
+
+    def get_ascii_map(self) -> str:
+        """
+        Get ASCII representation of the world map
 
         Returns:
-            Dictionary with visualization data and grid data
+            ASCII map as a string
         """
-        # Use non-interactive Agg backend to avoid plt.show() issues in headless environments
-        plt.switch_backend('Agg')
-
-        fig, ax = plt.subplots(figsize=(8, 8))
-
-        # Plot the grid
-        im = ax.imshow(self.grid, cmap=self.cmap, norm=self.norm,
-                       extent=[-self.origin * self.cell_size, (self.grid_size - self.origin) * self.cell_size,
-                               -self.origin * self.cell_size, (self.grid_size - self.origin) * self.cell_size])
-
-        # Add colorbar
-        cbar = plt.colorbar(im, ax=ax, ticks=[-1, 0, 1])
-        cbar.ax.set_yticklabels(['Unknown', 'Free', 'Occupied'])
-
-        # Plot robot position (as a triangle pointing in the heading direction)
-        robot_marker_size = 10
-        heading_rad = math.radians(self.state.heading)
-        dx = robot_marker_size * math.cos(heading_rad)
-        dy = robot_marker_size * math.sin(heading_rad)
-
-        ax.arrow(self.state.x, self.state.y, dx, dy,
-                 head_width=5, head_length=5, fc='r', ec='r')
-
-        # Plot robot position
-        ax.plot(self.state.x, self.state.y, 'ro', markersize=5)
-
-        # Add grid
-        ax.grid(True, linestyle='--', alpha=0.7)
-
-        # Set title and labels
-        ax.set_title(f'World Map (Robot at {self.state.x:.1f}, {self.state.y:.1f}, heading {self.state.heading:.1f}°)')
-        ax.set_xlabel('X (cm)')
-        ax.set_ylabel('Y (cm)')
-
-        # Set axis equal and limits
-        ax.set_aspect('equal')
-
-        # Prepare grid data for ASCII representation
-        grid_data = {
-            'grid': self.grid.tolist(),
-            'position': {
-                'x': float(self.state.x),
-                'y': float(self.state.y),
-                'heading': float(self.state.heading)
-            },
-            'dimensions': {
-                'width': self.grid_size,
-                'height': self.grid_size,
-                'cell_size': self.cell_size,
-                'origin': self.origin
-            }
+        # Symbols for different cell types
+        symbols = {
+            self.UNKNOWN: ' ',  # Unknown
+            self.FREE: '.',  # Free space
+            self.OBJECT: 'X',  # Object
+            self.CLIFF: '!',  # Cliff
+            self.CAR: 'C'  # Car
         }
 
-        # Always save to buffer
-        buf = io.BytesIO()
-        plt.savefig(buf, format='png', dpi=100)
-        buf.seek(0)
+        # Get current grid representation
+        grid_copy = self.grid.copy()
+        self.update_car_position()  # Ensure car is shown
 
-        result = {'grid_data': grid_data}
+        # Build ASCII map
+        ascii_map = ""
+        for row in range(self.grid_size):
+            line = ""
+            for col in range(self.grid_size):
+                line += symbols[grid_copy[row, col]]
+            ascii_map += line + "\n"
 
-        if return_image:
-            # Convert to base64
-            img_str = base64.b64encode(buf.read()).decode('utf-8')
-            plt.close(fig)
-            result['visualization'] = img_str
-        else:
-            # No need for plt.show(), just return None for visualization
-            plt.close(fig)
-            result['visualization'] = None
+        return ascii_map
 
-        return result
-
-    def get_ascii_map(self, width: int = 40, height: int = 20) -> str:
+    def visualize(self, return_image: bool = False) -> Dict[str, Any]:
         """
-        Generate ASCII representation of the map
+        Visualize the world map using matplotlib
 
         Args:
-            width: Width of ASCII map
-            height: Height of ASCII map
+            return_image: Whether to return a base64-encoded image
 
         Returns:
-            ASCII map as string
+            Dictionary with visualization data
         """
-        # Create empty ASCII map
-        ascii_map = [['·' for _ in range(width)] for _ in range(height)]
+        # Create a colormap
+        colors = ['lightgray', 'white', 'red', 'black', 'green']
+        cmap = LinearSegmentedColormap.from_list('world_map', colors, N=5)
 
-        # Calculate scaling factors
-        scale_x = self.grid_size / width
-        scale_y = self.grid_size / height
+        # Update car position
+        self.update_car_position()
 
-        # Fill ASCII map based on grid data
-        for y in range(height):
-            for x in range(width):
-                # Convert ASCII coordinates to grid coordinates
-                grid_x = int(x * scale_x)
-                grid_y = int(y * scale_y)
+        # Create figure and plot
+        fig, ax = plt.subplots(figsize=(10, 10))
+        im = ax.imshow(self.grid, cmap=cmap, vmin=0, vmax=4)
 
-                # Get cell value
-                if 0 <= grid_x < self.grid_size and 0 <= grid_y < self.grid_size:
-                    cell = self.grid[grid_y, grid_x]
+        # Add car position marker
+        car_row, car_col = self.world_to_grid(self.__state.x, self.__state.y)
+        ax.plot(car_col, car_row, 'bo', markersize=10)
 
-                    if cell == 1:  # Occupied
-                        ascii_map[y][x] = '#'
-                    elif cell == 0:  # Free
-                        ascii_map[y][x] = ' '
-                    # else unknown ('·')
+        # Draw car heading
+        heading_rad = math.radians(self.__state.heading)
+        heading_x = math.cos(heading_rad) * 5
+        heading_y = -math.sin(heading_rad) * 5  # Negative because y-axis is flipped in grid
+        ax.arrow(car_col, car_row, heading_x, heading_y,
+                 head_width=2, head_length=2, fc='blue', ec='blue')
 
-        # Add robot position
-        robot_grid_x, robot_grid_y = self.world_to_grid(self.state.x, self.state.y)
-        robot_ascii_x = int(robot_grid_x / scale_x)
-        robot_ascii_y = int(robot_grid_y / scale_y)
+        # Add grid
+        ax.grid(True, which='both', linestyle='-', linewidth=0.5, alpha=0.3)
 
-        # Only add robot if within ASCII map bounds
-        if 0 <= robot_ascii_x < width and 0 <= robot_ascii_y < height:
-            # Direction markers based on heading
-            heading_markers = {
-                0: '^',  # North
-                45: '/',  # Northeast
-                90: '>',  # East
-                135: '\\',  # Southeast
-                180: 'v',  # South
-                225: '/',  # Southwest
-                270: '<',  # West
-                315: '\\'  # Northwest
-            }
+        # Add labels and title
+        ax.set_title(
+            f'World Map (Position: {self.__state.x:.1f}, {self.__state.y:.1f}, Heading: {self.__state.heading:.1f}°)')
 
-            # Get closest direction
-            closest_heading = min(heading_markers.keys(),
-                                  key=lambda h: abs((self.state.heading - h + 180) % 360 - 180))
+        # Add color bar
+        cbar = plt.colorbar(im, ax=ax, ticks=[0, 1, 2, 3, 4])
+        cbar.set_ticklabels(['Unknown', 'Free', 'Object', 'Cliff', 'Car'])
 
-            ascii_map[robot_ascii_y][robot_ascii_x] = heading_markers[closest_heading]
+        # Add grid coordinates
+        ax.set_xticks(np.arange(0, self.grid_size, 10))
+        ax.set_yticks(np.arange(0, self.grid_size, 10))
 
-        # Convert to string
-        ascii_str = '\n'.join([''.join(row) for row in ascii_map])
+        # If requested, convert to base64 for web display
+        img_data = None
+        if return_image:
+            buf = io.BytesIO()
+            plt.savefig(buf, format='png')
+            buf.seek(0)
+            img_data = base64.b64encode(buf.read()).decode('utf-8')
+            plt.close(fig)
 
-        # Add legend
-        legend = (
-            f"\nLegend:\n"
-            f"  · = Unknown\n"
-            f"    = Free space\n"
-            f"  # = Obstacle\n"
-            f"  ^>v< = Robot position and direction\n"
-            f"\nRobot: ({self.state.x:.1f}, {self.state.y:.1f}), Heading: {self.state.heading:.1f}°"
-        )
-
-        return ascii_str + legend
+        return {
+            'grid_data': self.grid.tolist(),
+            'car_position': [self.__state.x, self.__state.y, self.__state.heading],
+            'visualization': img_data
+        }
