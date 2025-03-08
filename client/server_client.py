@@ -606,11 +606,6 @@ def execute_command(cmd):
             angle = request.args.get('angle')
             if angle:
                 params['angle'] = angle
-        # TODO: use this as a percent of the max at 50?
-        elif cmd == 'set_speed':
-            speed = request.args.get('speed')
-            if speed:
-                params['speed'] = float(speed)
 
     response = bt_client.send_command('command', cmd, params)
 

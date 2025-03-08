@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PicarX Dual Controller</title>
+    <title>PicarX Controller</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@stackoverflow/stacks/dist/css/stacks.min.css">
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <script src="/scripts/initialize-controllers.js" defer></script>
@@ -126,12 +126,87 @@
             padding: 8px 12px;
             border-radius: 4px;
         }
+
+        /* Custom styling for the range input */
+        input[type=range] {
+            -webkit-appearance: none;
+            appearance: none;
+            background: transparent;
+            cursor: pointer;
+        }
+
+        /* Track styles */
+        input[type=range]::-webkit-slider-runnable-track {
+            background: #ddd;
+            height: 8px;
+            border-radius: 4px;
+        }
+
+        input[type=range]::-moz-range-track {
+            background: #ddd;
+            height: 8px;
+            border-radius: 4px;
+        }
+
+        /* Thumb styles */
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            margin-top: -4px; /* Thumb position adjustment */
+            background-color: #4a90e2;
+            height: 16px;
+            width: 16px;
+            border-radius: 50%;
+        }
+
+        input[type=range]::-moz-range-thumb {
+            border: none;
+            background-color: #4a90e2;
+            height: 16px;
+            width: 16px;
+            border-radius: 50%;
+        }
+
+        /* Focus styles */
+        input[type=range]:focus {
+            outline: none;
+        }
+
+        input[type=range]:focus::-webkit-slider-thumb {
+            box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.3);
+        }
+
+        input[type=range]:focus::-moz-range-thumb {
+            box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.3);
+        }
+
+        /* Disabled styles */
+        input[type=range]:disabled::-webkit-slider-runnable-track {
+            background: #eee;
+        }
+
+        input[type=range]:disabled::-moz-range-track {
+            background: #eee;
+        }
+
+        input[type=range]:disabled::-webkit-slider-thumb {
+            background-color: #ccc;
+        }
+
+        input[type=range]:disabled::-moz-range-thumb {
+            background-color: #ccc;
+        }
     </style>
 </head>
 <body>
+    <script>
+        (function () {
+            document.body.classList.toggle("theme-dark", true);
+        }());
+    </script>
     <div class="container">
         <div class="header">
-            <h1>PicarX Dual Controller Interface</h1>
+            <h1>Wireless Controller Interface</h1>
             <p>Control your PicarX robot using either Bluetooth or WiFi connection</p>
 
             <div class="tab-buttons">

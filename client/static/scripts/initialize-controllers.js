@@ -485,38 +485,6 @@ function setupButtonHandlers(container, isBluetooth) {
     setupButton('left', 'left', -30);
     setupButton('right', 'right', 30);
 
-    // Setup speed control if present
-    const speedControl = container.querySelector('#speedControl');
-    if (speedControl) {
-        const speedValue = container.querySelector('#speedValue');
-
-        // Clone to remove existing listeners
-        const newSpeedControl = speedControl.cloneNode(true);
-        speedControl.parentNode.replaceChild(newSpeedControl, speedControl);
-
-        // Add event listener for speed changes
-        newSpeedControl.addEventListener('change', async function() {
-            const speed = parseFloat(this.value);
-            if (speedValue) {
-                speedValue.textContent = speed.toFixed(2);
-            }
-
-            // Send the speed command
-            await sendCommand('set_speed', {
-                speed: speed,
-                // Use content type application/json
-                contentType: 'application/json'
-            });
-        });
-
-        // Update speed value display if present
-        newSpeedControl.addEventListener('input', function() {
-            if (speedValue) {
-                speedValue.textContent = parseFloat(this.value).toFixed(2);
-            }
-        });
-    }
-
     // Setup scan environment button
     const scanEnvBtn = container.querySelector('#scanEnv');
     if (scanEnvBtn) {
@@ -707,11 +675,6 @@ function setupButtonHandlers(container, isBluetooth) {
                             button.disabled = false;
                         });
 
-                        // Enable speed control if present
-                        if (container.querySelector('#speedControl')) {
-                            container.querySelector('#speedControl').disabled = false;
-                        }
-
                         newConnectBtn.disabled = true;
                         newDisconnectBtn.disabled = false;
 
@@ -772,11 +735,6 @@ function setupButtonHandlers(container, isBluetooth) {
                     container.querySelectorAll('.controls button, #scanEnv, #toggleVideo').forEach(button => {
                         button.disabled = true;
                     });
-
-                    // Disable speed control if present
-                    if (container.querySelector('#speedControl')) {
-                        container.querySelector('#speedControl').disabled = true;
-                    }
 
                     newConnectBtn.disabled = false;
                     newDisconnectBtn.disabled = true;

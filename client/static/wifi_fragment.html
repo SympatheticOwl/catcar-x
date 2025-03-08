@@ -1,4 +1,4 @@
-<h1>PicarX Controller</h1>
+<h1>Wifi Controller</h1>
 
 <div id="status">Status: Ready</div>
 
@@ -28,13 +28,12 @@
 
 
 <script>
-    const API_URL = 'http://10.0.0.219:8000';  // Replace with your Pi's IP
-    // const API_URL = 'http://192.168.0.163:8000';  // Replace with your Pi's IP
+    const API_URL = 'http://10.0.0.219:8000';
+    // const API_URL = 'http://192.168.0.163:8000';
     const status = document.getElementById('status');
     const videoFeed = document.getElementById('videoFeed');
     let isVideoActive = false;
 
-    // Helper function for making API calls
     async function sendCommand(cmd, options = {}) {
         try {
             // const queryString = options.angle ? `?angle=${options.angle}` : '';
