@@ -366,32 +366,17 @@ function setupButtonHandlers(container, isBluetooth) {
         try {
             console.log(`Sending ${cmd} command to ${apiUrl}`);
 
-            // Handle different API formats between Bluetooth and WiFi controllers
             let url;
             let fetchOptions = { method: 'POST' };
 
-            // Add AbortController for timeout handling
             const controller = new AbortController();
             const timeoutMs = options.timeout || (cmd === 'scan' ? 90000 : 30000); // Use longer timeout for scan
             const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
             fetchOptions.signal = controller.signal;
 
-            if (isBluetooth) {
-                // Bluetooth controller uses query params for angles
-                const queryString = options.angle ? `?angle=${options.angle}` : '';
-                url = `${apiUrl}/command/${cmd}${queryString}`;
-            } else {
-                // WiFi controller might not use query params the same way
-                url = `${apiUrl}/command/${cmd}`;
-
-                // If we need to pass parameters in body instead
-                if (options.angle) {
-                    fetchOptions.headers = {
-                        'Content-Type': 'application/json'
-                    };
-                    fetchOptions.body = JSON.stringify({ angle: options.angle });
-                }
-            }
+            // uses query params for angles, but they arent being used right now
+            const queryString = options.angle ? `?angle=${options.angle}` : '';
+            url = `${apiUrl}/command/${cmd}${queryString}`;
 
             const response = await fetch(url, fetchOptions);
             clearTimeout(timeoutId);

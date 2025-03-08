@@ -159,8 +159,7 @@ class WifiServer:
                 })
 
             elif cmd in ["left", "right"]:
-                # Get angle from query params, default to ±30
-                angle = int(request.args.get('angle', 30 if cmd == "right" else -30))
+                angle = int(30 if cmd == "right" else -30)
                 success = self.manager.commands.turn(angle)
                 if not success:
                     return jsonify({

@@ -234,7 +234,8 @@ class BTServer:
                 })
 
             elif cmd in ["left", "right"]:
-                angle = int(params.get('angle', 30 if cmd == "right" else -30))
+                angle = int(30 if cmd == "right" else -30)
+                print(f'setting andle: ${angle}')
 
                 success = self.commands.turn(angle)
                 if not success:
@@ -260,21 +261,6 @@ class BTServer:
                 return json.dumps({
                     "status": "success",
                     "message": "Stopped movement"
-                })
-
-            elif cmd == "set_speed":
-                # Set speed from params
-                speed = float(params.get('speed', 0.5))
-
-                # Clamp speed between 0.1 and 1.0
-                speed = max(0.1, min(1.0, speed))
-
-                # Set speed in state
-                self.commands.state.speed = speed
-
-                return json.dumps({
-                    "status": "success",
-                    "message": f"Speed set to {speed}"
                 })
 
             else:
