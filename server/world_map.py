@@ -271,7 +271,7 @@ class WorldMap:
             line = ""
             for col in range(self.grid_size):
                 if grid_copy[row, col] == 0:
-                    line += "0"  # Empty/unknown
+                    line += "."  # Empty/unknown
                 elif grid_copy[row, col] == 1:
                     line += "1"  # Obstacle
                 elif grid_copy[row, col] == 2:
