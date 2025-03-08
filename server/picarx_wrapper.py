@@ -9,7 +9,7 @@ class PicarXWrapper:
     def __init__(self, state: State):
         self.px = Picarx()
         self.__state = state
-        self.forward_speed_offset = 65
+        self.forward_speed_offset = 70
 
     def _speed_to_cm_per_sec(self, speed_value):
         """Convert motor speed value to cm/s"""
@@ -72,7 +72,7 @@ class PicarXWrapper:
         # print(f'motor speed 2: {self.px.motor_speed_pins[2]}')
 
         self.px.set_motor_speed(1, -1 * speed)
-        self.px.set_motor_speed(2, speed)
+        self.px.set_motor_speed(2, speed + 30)
         self.__state.current_speed = -self._speed_to_cm_per_sec(speed)
         self.__state.is_moving = speed != 0
         self.__state.is_backing_up = True
