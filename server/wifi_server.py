@@ -6,15 +6,53 @@ os.environ['OPENCV_VIDEOIO_PRIORITY_BACKEND'] = 'v4l2'  # Use V4L2 backend for O
 import time
 from flask import Flask, jsonify, Response, request
 import asyncio
+import threading
 from commands import Commands
 
+# allows commands to be run side by side
+class AsyncCommandManager:
+    def __init__(self, commands: Commands):
+        self.loop = asyncio.new_event_loop()
+        self.commands = commands
+        self.thread = threading.Thread(target=self._run_event_loop, daemon=True)
+        self.thread.start()
+
+    def _run_event_loop(self):
+        """Runs the event loop in a separate thread"""
+        asyncio.set_event_loop(self.loop)
+
+        # Initialize monitoring tasks in the event loop
+        # self.loop.run_until_complete(self._initialize_commands())
+        self.loop.run_forever()
+
+    # async def _initialize_commands(self):
+    #     """Initialize all monitoring tasks"""
+    #     self.commands.state.ultrasonic_task = self.loop.create_task(
+    #         self.commands.object_system.ultrasonic_monitoring())
+    #     self.commands.state.cliff_task = self.loop.create_task(
+    #         self.commands.object_system.cliff_monitoring())
+    #     self.commands.state.pos_track_task = self.loop.create_task(
+    #         self.commands.object_system.px.continuous_position_tracking())
+
+    # def run_coroutine(self, coro):
+    #     """Run a coroutine in the event loop"""
+    #     future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+    #     return future.result()
+
+
+# Create Flask app - now it's a standalone object, not within a class method
 app = Flask(__name__)
 
 
 class WifiServer:
     def __init__(self, commands: Commands):
+        # self.manager = AsyncCommandManager(commands)
+
         self.loop = asyncio.new_event_loop()
         self.commands = commands
+        # self.thread = threading.Thread(target=self._run_event_loop, daemon=True)
+        # self.thread.start()
+
         # Store reference to the global app
         self.app = app
 
@@ -168,6 +206,7 @@ class WifiServer:
                     "message": "Vision system stopped"
                 })
 
+
             elif cmd == "reset":
                 try:
                     self.commands.reset()
@@ -259,6 +298,7 @@ class WifiServer:
                 self.commands.stop_vision()
             self.commands.cancel_movement()
 
+        # Stop the event loop
         self.loop.call_soon_threadsafe(self.loop.stop)
 
 
