@@ -7,44 +7,31 @@ from robot_hat import ADC
 
 
 class Telemetry:
-    """
-    Telemetry class for monitoring Raspberry Pi system metrics like CPU temperature
-    and battery level (if available through connected hardware).
-    """
 
     def __init__(self, battery_path=None):
-        """
-        Initialize the telemetry system.
-
-        Args:
-            battery_path (str, optional): Path to battery information if using a specific
-                                         battery module/HAT with its own monitoring interface.
-        """
         self.battery_adc = ADC(4)
         self.battery_path = battery_path
         self.last_cpu_temp = 0
         self.last_battery_level = None
         self.last_update_time = 0
-        self.update_interval = 5  # Update readings every 5 seconds
+        self.update_interval = 5  # update readings every 5 seconds
 
-        self.MAX_VOLTAGE = 8.4  # Fully charged 2S Li-ion
-        self.MIN_VOLTAGE = 6.0  # Over-discharge protection at 6.0V
-        self.BATTERY_CAPACITY_MAH = 2000  # 2000mAh as specified
-        self.SCALING_FACTOR = 3  # May need calibration
-        # For time remaining estimation
-        self.voltage_history = collections.deque(maxlen=60)  # Store last minute of readings
-        self.charging_threshold = 0.005  # Voltage increase per minute that indicates charging
+        self.MAX_VOLTAGE = 8.4
+        self.MIN_VOLTAGE = 6.0
+        self.BATTERY_CAPACITY_MAH = 2000  # 2000mAh
+        self.SCALING_FACTOR = 3  # needs calibration
+
+        self.voltage_history = collections.deque(maxlen=60)
+        self.charging_threshold = 0.01  # Voltage increase per minute that indicates charging, needs adjustment
         self.current_draw_estimates = {
-            'idle': 100,  # mA - estimate when robot is stationary
-            'moving': 500,  # mA - estimate when moving (no load)
-            'heavy_load': 1000  # mA - estimate under heavy load (climbing, carrying)
+            'idle': 100,
+            'moving': 500,
+            'heavy_load': 1000
         }
 
-        # Default current usage pattern - can be updated based on robot state
         self.current_usage_mode = 'idle'
 
     def _should_update(self):
-        """Check if values should be updated based on time interval"""
         current_time = time.time()
         if current_time - self.last_update_time >= self.update_interval:
             self.last_update_time = current_time
@@ -52,12 +39,6 @@ class Telemetry:
         return False
 
     def get_cpu_temperature(self):
-        """
-        Get the current CPU temperature.
-
-        Returns:
-            float: CPU temperature in Celsius
-        """
         if not self._should_update():
             return self.last_cpu_temp
 
@@ -69,7 +50,6 @@ class Telemetry:
                 return self.last_cpu_temp
         except Exception as e:
             print(f"Error getting CPU temperature: {e}")
-            # Fall back to vcgencmd if thermal zone interface isn't available
             try:
                 temp_output = subprocess.check_output(['vcgencmd', 'measure_temp']).decode('utf-8')
                 temp = float(re.search(r'temp=(\d+\.\d+)', temp_output).group(1))
@@ -80,15 +60,6 @@ class Telemetry:
                 return self.last_cpu_temp or 0
 
     def get_system_load(self):
-        """
-        Get system load and memory usage.
-
-        Returns:
-            dict: Dictionary containing system metrics:
-                - cpu_usage (float): CPU usage percentage
-                - memory_usage (float): Memory usage percentage
-                - load_average (list): System load average for 1, 5, and 15 minutes
-        """
         system_info = {
             "cpu_usage": 0,
             "memory_usage": 0,
@@ -128,7 +99,7 @@ class Telemetry:
 
     def get_battery_voltage(self):
         raw_voltage = self.battery_adc.read_voltage()
-        scaling_factor = 3  # Typical for 2S LiPo battery monitoring, may need adjustment
+        scaling_factor = 3
         battery_voltage = raw_voltage * scaling_factor
         return battery_voltage
 
@@ -148,49 +119,51 @@ class Telemetry:
             return True
         return False
 
-    def estimate_time_remaining(self, voltage, percentage):
-        # Add current voltage to history
-        self.voltage_history.append((time.time(), voltage))
+    # doesnt work right now
+    # def estimate_time_remaining(self, voltage, percentage):
+    #     # Add current voltage to history
+    #     self.voltage_history.append((time.time(), voltage))
+    #
+    #     # Method 1: Based on voltage discharge rate
+    #     if len(self.voltage_history) >= 10:  # Need some history for discharge rate
+    #         oldest = self.voltage_history[0]
+    #         newest = self.voltage_history[-1]
+    #         time_diff_hours = (newest[0] - oldest[0]) / 3600
+    #
+    #         if time_diff_hours > 0.01:  # Ensure we have enough time difference
+    #             voltage_diff = oldest[1] - newest[1]
+    #
+    #             if voltage_diff > 0:  # Discharging
+    #                 discharge_rate = voltage_diff / time_diff_hours  # V/hour
+    #                 voltage_remaining = voltage - self.MIN_VOLTAGE
+    #                 hours_remaining_voltage = voltage_remaining / discharge_rate
+    #
+    #                 # Method 2: Based on battery percentage and current draw
+    #                 current_draw = self.current_draw_estimates[self.current_usage_mode]
+    #                 capacity_remaining_mah = (percentage / 100) * self.BATTERY_CAPACITY_MAH
+    #                 hours_remaining_current = capacity_remaining_mah / current_draw
+    #
+    #                 # Weighted average of both methods (favor the voltage-based one)
+    #                 hours_remaining = (hours_remaining_voltage * 0.7) + (hours_remaining_current * 0.3)
+    #
+    #                 hours = int(hours_remaining)
+    #                 minutes = int((hours_remaining - hours) * 60)
+    #
+    #                 return f"{hours}h {minutes}m ({self.current_usage_mode} mode)"
+    #
+    #             return "Charging or stable"
+    #
+    #     # Fallback method when discharge rate can't be calculated
+    #     current_draw = self.current_draw_estimates[self.current_usage_mode]
+    #     capacity_remaining_mah = (percentage / 100) * self.BATTERY_CAPACITY_MAH
+    #     hours_remaining = capacity_remaining_mah / current_draw
+    #
+    #     hours = int(hours_remaining)
+    #     minutes = int((hours_remaining - hours) * 60)
+    #
+    #     return f"{hours}h {minutes}m (estimated based on {self.current_usage_mode} mode)"
 
-        # Method 1: Based on voltage discharge rate
-        if len(self.voltage_history) >= 10:  # Need some history for discharge rate
-            oldest = self.voltage_history[0]
-            newest = self.voltage_history[-1]
-            time_diff_hours = (newest[0] - oldest[0]) / 3600
-
-            if time_diff_hours > 0.01:  # Ensure we have enough time difference
-                voltage_diff = oldest[1] - newest[1]
-
-                if voltage_diff > 0:  # Discharging
-                    discharge_rate = voltage_diff / time_diff_hours  # V/hour
-                    voltage_remaining = voltage - self.MIN_VOLTAGE
-                    hours_remaining_voltage = voltage_remaining / discharge_rate
-
-                    # Method 2: Based on battery percentage and current draw
-                    current_draw = self.current_draw_estimates[self.current_usage_mode]
-                    capacity_remaining_mah = (percentage / 100) * self.BATTERY_CAPACITY_MAH
-                    hours_remaining_current = capacity_remaining_mah / current_draw
-
-                    # Weighted average of both methods (favor the voltage-based one)
-                    hours_remaining = (hours_remaining_voltage * 0.7) + (hours_remaining_current * 0.3)
-
-                    hours = int(hours_remaining)
-                    minutes = int((hours_remaining - hours) * 60)
-
-                    return f"{hours}h {minutes}m ({self.current_usage_mode} mode)"
-
-                return "Charging or stable"
-
-        # Fallback method when discharge rate can't be calculated
-        current_draw = self.current_draw_estimates[self.current_usage_mode]
-        capacity_remaining_mah = (percentage / 100) * self.BATTERY_CAPACITY_MAH
-        hours_remaining = capacity_remaining_mah / current_draw
-
-        hours = int(hours_remaining)
-        minutes = int((hours_remaining - hours) * 60)
-
-        return f"{hours}h {minutes}m (estimated based on {self.current_usage_mode} mode)"
-
+    # needs adjustment, doesn't work
     def is_battery_charging(self):
         if len(self.voltage_history) < 10:  # Need some history to determine
             return "Unknown - gathering data"
@@ -214,16 +187,6 @@ class Telemetry:
             return "Stable"  # Voltage stable, neither charging nor discharging significantly
 
     def get_battery_level(self):
-        """
-        Get the current battery level if available.
-
-        Returns:
-            dict: Dictionary containing battery metrics:
-                - percentage (float): Battery level percentage (0-100)
-                - voltage (float): Battery voltage
-                - is_charging (bool): Whether the battery is currently charging
-                - time_remaining (float): Estimated time remaining in hours (if available)
-        """
         if not self._should_update() and self.last_battery_level is not None:
             return self.last_battery_level
 
@@ -234,19 +197,13 @@ class Telemetry:
             "percentage": percentage,
             "voltage": voltage,
             "is_charging": self.is_battery_charging(),
-            "time_remaining": self.estimate_time_remaining(voltage, percentage),
+            # "time_remaining": self.estimate_time_remaining(voltage, percentage),
         }
 
         self.last_battery_level = battery_info
         return battery_info
 
     def get_all_telemetry(self):
-        """
-        Get all telemetry information in a single call.
-
-        Returns:
-            dict: Dictionary containing all telemetry metrics
-        """
         data = {
             "cpu_temperature": self.get_cpu_temperature(),
             "battery": self.get_battery_level(),

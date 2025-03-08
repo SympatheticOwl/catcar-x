@@ -14,6 +14,7 @@ if __name__ == "__main__":
 
         # Start Flask server in a separate thread
         # Use the app instance's run method, not the Flask class method
+        # Need to do this so we can run wifi and bt at same time
         flask_thread = threading.Thread(
             target=wifi_server.app.run,
             kwargs={

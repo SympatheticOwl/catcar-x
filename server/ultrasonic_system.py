@@ -26,15 +26,6 @@ class UltrasonicSystem:
         self.scan_count = 0
 
     async def scan_avg(self, num_samples: int = 3) -> List[float]:
-        """
-        Take multiple distance readings and return the filtered average
-
-        Args:
-            num_samples: Number of samples to take
-
-        Returns:
-            List of valid distance readings
-        """
         distances = []
         for _ in range(num_samples):
             dist = self.px.ultrasonic.read()
@@ -58,15 +49,6 @@ class UltrasonicSystem:
         return distances
 
     def calculate_filtered_distance(self, distances: List[float]) -> float:
-        """
-        Calculate filtered distance with outlier rejection
-
-        Args:
-            distances: List of distance readings
-
-        Returns:
-            Filtered distance value
-        """
         if not distances:
             return 300  # Default safe distance if no valid readings
 
@@ -83,9 +65,6 @@ class UltrasonicSystem:
             return sum(distances) / len(distances)
 
     async def scan_environment(self):
-        """
-        Scan surroundings using servo-mounted ultrasonic sensor
-        """
         self.scan_count += 1
         print(f"Starting scan cycle #{self.scan_count}")
 
@@ -115,9 +94,6 @@ class UltrasonicSystem:
         print(f"Scan cycle #{self.scan_count} completed")
 
     async def ultrasonic_monitoring(self):
-        """
-        Continuously monitor distance readings for emergency stops
-        """
         while True:
             # Get current distance reading
             await self.scan_avg()
@@ -135,9 +111,6 @@ class UltrasonicSystem:
             await asyncio.sleep(self.__state.sensor_read_freq)
 
     async def cliff_monitoring(self):
-        """
-        Continuously monitor cliff sensors to detect edges/drops
-        """
         while True:
             self.__state.is_cliff = self.px.get_cliff_status(self.px.get_grayscale_data())
 
@@ -151,9 +124,6 @@ class UltrasonicSystem:
             await asyncio.sleep(self.__state.sensor_read_freq)
 
     async def emergency_stop(self):
-        """
-        Perform emergency stop and cancel current movement
-        """
         print("Emergency stop, hazard detected!")
         self.__state.emergency_stop_flag = True
 
@@ -164,12 +134,6 @@ class UltrasonicSystem:
             self.__state.movement_task = None
 
     def get_current_distance(self) -> float:
-        """
-        Get the current distance reading
-
-        Returns:
-            Current ultrasonic distance in cm
-        """
         return self.__state.current_distance
 
     def reset(self):

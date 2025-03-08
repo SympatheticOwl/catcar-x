@@ -198,10 +198,8 @@ class WorldMap:
         # 0=white (empty), 1=red (obstacle), 2=blue (car)
         cmap = ListedColormap(['white', 'red', 'blue'])
 
-        # Display the grid
         ax.imshow(grid_viz, cmap=cmap, vmin=0, vmax=2)
 
-        # Add heading indicator
         heading_rad = math.radians(self.__state.heading)
         dx = 5 * math.cos(heading_rad)
         dy = -5 * math.sin(heading_rad)  # Negative because y-axis is flipped in grid

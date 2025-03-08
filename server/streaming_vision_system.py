@@ -56,7 +56,6 @@ class VisionSystem:
         self._latest_jpeg = None
 
     async def capture_and_detect(self):
-        """Continuously capture frames and perform object detection"""
         while True:
             current_time = time.time()
 
@@ -108,7 +107,6 @@ class VisionSystem:
             await asyncio.sleep(0.01)
 
     def _draw_boxes(self):
-        """Draw bounding boxes on the frame and return the annotated frame"""
         if self.frame is None:
             return None
 
@@ -124,14 +122,12 @@ class VisionSystem:
         return debug_frame
 
     def _preprocess_image(self, image):
-        """Preprocess image for EfficientDet model which expects uint8 input"""
         image = cv2.resize(image, (self.width, self.height))
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # Convert BGR to RGB
         image = np.expand_dims(image, axis=0)
         return image.astype(np.uint8)
 
     def get_obstacle_info(self):
-        """Return information about detected obstacles"""
         # Focus on objects in the center third of the frame
         if self.frame is None or not self.detected_objects:
             return None
@@ -150,7 +146,6 @@ class VisionSystem:
         return center_objects
 
     def _update_jpeg_frame(self, frame: np.ndarray) -> None:
-        """Update the latest JPEG frame with thread safety"""
         if frame is None:
             return
 
@@ -161,11 +156,9 @@ class VisionSystem:
                 self._latest_jpeg = jpeg.tobytes()
 
     def get_latest_frame_jpeg(self) -> Optional[bytes]:
-        """Get the latest JPEG frame with thread safety"""
         with self._frame_lock:
             return self._latest_jpeg
 
     def cleanup(self):
-        """Cleanup camera resources"""
         self.camera.stop()
         cv2.destroyAllWindows()

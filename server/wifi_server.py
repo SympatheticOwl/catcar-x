@@ -9,35 +9,6 @@ import asyncio
 import threading
 from commands import Commands
 
-class AsyncCommandManager:
-    def __init__(self, commands: Commands):
-        self.loop = asyncio.new_event_loop()
-        self.commands = commands
-        self.thread = threading.Thread(target=self._run_event_loop, daemon=True)
-        self.thread.start()
-
-    def _run_event_loop(self):
-        """Runs the event loop in a separate thread"""
-        asyncio.set_event_loop(self.loop)
-
-        # Initialize monitoring tasks in the event loop
-        self.loop.run_until_complete(self._initialize_commands())
-        self.loop.run_forever()
-
-    async def _initialize_commands(self):
-        """Initialize all monitoring tasks"""
-        self.commands.state.ultrasonic_task = self.loop.create_task(
-            self.commands.object_system.ultrasonic_monitoring())
-        self.commands.state.cliff_task = self.loop.create_task(
-            self.commands.object_system.cliff_monitoring())
-        self.commands.state.pos_track_task = self.loop.create_task(
-            self.commands.object_system.px.continuous_position_tracking())
-
-    def run_coroutine(self, coro):
-        """Run a coroutine in the event loop"""
-        future = asyncio.run_coroutine_threadsafe(coro, self.loop)
-        return future.result()
-
 app = Flask(__name__)
 
 class WifiServer:
@@ -51,13 +22,10 @@ class WifiServer:
         self.register_routes()
 
     def _run_event_loop(self):
-        """Runs the event loop in a separate thread"""
         asyncio.set_event_loop(self.loop)
         self.loop.run_forever()
 
     def register_routes(self):
-        """Register all Flask routes"""
-        # Attach class methods to app routes
         self.app.after_request(self.after_request)
         self.app.route('/video_feed')(self.video_feed)
         self.app.route("/command/scan", methods=['POST'])(self.scan_command)
@@ -75,7 +43,6 @@ class WifiServer:
         return response
 
     def generate_frames(self):
-        """Generator function for video streaming"""
         while True:
             if not self.commands:
                 yield b''
@@ -92,14 +59,12 @@ class WifiServer:
             time.sleep(0.033)  # ~30 fps
 
     def video_feed(self):
-        """Video streaming route"""
         return Response(
             self.generate_frames(),
             mimetype='multipart/x-mixed-replace; boundary=frame'
         )
 
     def scan_command(self):
-        """Start a scan and return results immediately"""
         if not self.commands:
             return jsonify({
                 "status": "error",
@@ -127,7 +92,6 @@ class WifiServer:
             }), 500
 
     def execute_command(self, cmd: str):
-        """Execute a command on the PicarX"""
         try:
             if not self.commands:
                 return jsonify({
@@ -223,7 +187,6 @@ class WifiServer:
             }), 500
 
     def get_status(self):
-        """Get the current status of the PicarX"""
         if not self.commands:
             return jsonify({
                 "status": "error",
@@ -236,7 +199,6 @@ class WifiServer:
         })
 
     def get_world_state(self):
-        """Get the current status of the PicarX"""
         if not self.commands:
             return jsonify({
                 "status": "error",
@@ -248,7 +210,6 @@ class WifiServer:
         })
 
     def get_visualization(self):
-        """Get the matplotlib visualization of the world map"""
         if request.method == 'OPTIONS':
             return jsonify({'status': 'ok'})
 
@@ -284,7 +245,6 @@ class WifiServer:
             }), 500
 
     def cleanup(self):
-        """Cleanup function to stop all tasks and the event loop"""
         if self.commands:
             if self.commands.state.vision_task:
                 self.commands.stop_vision()

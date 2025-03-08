@@ -34,12 +34,6 @@ class Commands:
         self.state.pos_track_task = asyncio.create_task(self.object_system.px.continuous_position_tracking())
 
     async def scan_env(self):
-        """
-        Scan the environment and return the world state
-
-        Returns:
-            Dictionary with scan results and visualization data
-        """
         # Perform a scan
         print("Starting environment scan...")
         await self.object_system.scan_environment()
@@ -71,30 +65,12 @@ class Commands:
         return self.state.current_distance
 
     def get_telemetry(self):
-        """
-        Get system telemetry including battery level and CPU temperature
-
-        Returns:
-            Dictionary with telemetry data
-        """
         return self.telemetry.get_all_telemetry()
 
     def get_battery_level(self):
-        """
-        Get battery level information if available
-
-        Returns:
-            Dictionary with battery info
-        """
         return self.telemetry.get_battery_level()
 
     def get_cpu_temperature(self):
-        """
-        Get CPU temperature
-
-        Returns:
-            Float: CPU temperature in Celsius
-        """
         return self.telemetry.get_cpu_temperature()
 
     # TODO: set speed state
@@ -124,12 +100,6 @@ class Commands:
             self.state.movement_task = None
 
     def world_state(self):
-        """
-        Get the current world state including robot position, heading, and detected objects
-
-        Returns:
-            Dictionary with world state data
-        """
         # Get position data
         position = self.object_system.px.get_position()
 

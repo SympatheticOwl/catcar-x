@@ -297,7 +297,6 @@ class BTServer:
         }, default=numpy_json_encoder)
 
     def handle_telemetry(self, cmd, command_id):
-        """Handle telemetry endpoint requests"""
         if not self.commands:
             return json.dumps({
                 "status": "error",
