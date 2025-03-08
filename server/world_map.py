@@ -252,20 +252,11 @@ class WorldMap:
         self.interpolate_obstacles()
 
     def get_ascii_map(self) -> str:
-        """
-        Generate simplified ASCII representation of the map
-
-        Returns:
-            String representing the grid with car position
-        """
-        # Get a copy of the grid
         grid_copy = self.grid.copy()
 
-        # Mark car's position
         car_row, car_col = self.world_to_grid(self.__state.x, self.__state.y)
         grid_copy[car_row, car_col] = 2  # 2 represents car
 
-        # Generate ASCII representation
         result = ""
         for row in range(self.grid_size):
             line = ""
@@ -273,23 +264,14 @@ class WorldMap:
                 if grid_copy[row, col] == 0:
                     line += "."  # Empty/unknown
                 elif grid_copy[row, col] == 1:
-                    line += "1"  # Obstacle
+                    line += "!"  # Obstacle
                 elif grid_copy[row, col] == 2:
-                    line += "#"  # Car
+                    line += "C"  # Car
             result += line + "\n"
 
         return result
 
     def visualize(self, return_image: bool = False) -> Dict:
-        """
-        Visualize the world map
-
-        Args:
-            return_image: If True, return base64-encoded image
-
-        Returns:
-            Dictionary with grid data and visualization
-        """
         # Create a copy of the grid for visualization
         grid_viz = self.grid.copy()
 
