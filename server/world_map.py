@@ -11,7 +11,7 @@ from state_handler import State
 
 
 class WorldMap:
-    def __init__(self, state: State, grid_size: int = 100, resolution: float = 1.0):
+    def __init__(self, state: State, grid_size: int = 400, resolution: float = 5.0):
         """
         Initialize world map grid for object tracking
 
