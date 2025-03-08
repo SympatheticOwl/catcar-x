@@ -9,7 +9,6 @@ class PicarXWrapper:
     def __init__(self, state: State):
         self.px = Picarx()
         self.__state = state
-        self.forward_speed_offset = 75
 
     def _speed_to_cm_per_sec(self, speed_value):
         rpm = (abs(speed_value) / self.__state.MAX_MOTOR_SPEED) * self.__state.MAX_RPM
