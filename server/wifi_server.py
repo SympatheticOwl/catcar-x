@@ -2,54 +2,19 @@ import os
 
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'  # Tell Qt to not use GUI
 os.environ['OPENCV_VIDEOIO_PRIORITY_BACKEND'] = 'v4l2'  # Use V4L2 backend for OpenCV
-os.environ['MPLBACKEND'] = 'Agg'  # Force matplotlib to use Agg backend
 
 import time
 from flask import Flask, jsonify, Response, request
-from typing import Dict, Optional
 import asyncio
-import threading
 from commands import Commands
 
-
-class AsyncCommandManager:
-    def __init__(self, commands: Commands):
-        self.loop = asyncio.new_event_loop()
-        self.commands = commands
-        self.thread = threading.Thread(target=self._run_event_loop, daemon=True)
-        self.thread.start()
-
-    def _run_event_loop(self):
-        """Runs the event loop in a separate thread"""
-        asyncio.set_event_loop(self.loop)
-        # self.commands = Commands()
-
-        # Initialize monitoring tasks in the event loop
-        self.loop.run_until_complete(self._initialize_commands())
-        self.loop.run_forever()
-
-    async def _initialize_commands(self):
-        """Initialize all monitoring tasks"""
-        self.commands.state.ultrasonic_task = self.loop.create_task(
-            self.commands.object_system.ultrasonic_monitoring())
-        self.commands.state.cliff_task = self.loop.create_task(
-            self.commands.object_system.cliff_monitoring())
-        self.commands.state.pos_track_task = self.loop.create_task(
-            self.commands.object_system.px.continuous_position_tracking())
-
-    def run_coroutine(self, coro):
-        """Run a coroutine in the event loop"""
-        future = asyncio.run_coroutine_threadsafe(coro, self.loop)
-        return future.result()
-
-
-# Create Flask app - now it's a standalone object, not within a class method
 app = Flask(__name__)
 
 
 class WifiServer:
     def __init__(self, commands: Commands):
-        self.manager = AsyncCommandManager(commands)
+        self.loop = asyncio.new_event_loop()
+        self.commands = commands
         # Store reference to the global app
         self.app = app
 
@@ -78,11 +43,11 @@ class WifiServer:
     def generate_frames(self):
         """Generator function for video streaming"""
         while True:
-            if not self.manager.commands:
+            if not self.commands:
                 yield b''
                 continue
 
-            frame = self.manager.commands.vision.get_latest_frame_jpeg()
+            frame = self.commands.vision.get_latest_frame_jpeg()
             if frame is not None:
                 yield b'--frame\r\n'
                 yield b'Content-Type: image/jpeg\r\n\r\n'
@@ -101,7 +66,7 @@ class WifiServer:
 
     def scan_command(self):
         """Start a scan and return results immediately"""
-        if not self.manager.commands:
+        if not self.commands:
             return jsonify({
                 "status": "error",
                 "message": "Server still initializing"
@@ -110,8 +75,8 @@ class WifiServer:
         try:
             # Create async task to perform scan
             future = asyncio.run_coroutine_threadsafe(
-                self.manager.commands.scan_env(),
-                self.manager.loop
+                self.commands.scan_env(),
+                self.loop
             )
 
             # Get the result with timeout
@@ -133,14 +98,14 @@ class WifiServer:
     def execute_command(self, cmd: str):
         """Execute a command on the PicarX"""
         try:
-            if not self.manager.commands:
+            if not self.commands:
                 return jsonify({
                     "status": "error",
                     "message": "Server still initializing"
                 }), 503
 
             if cmd == "forward":
-                success = self.manager.commands.forward()
+                success = self.commands.forward()
                 if not success:
                     return jsonify({
                         "status": "error",
@@ -152,7 +117,7 @@ class WifiServer:
                 })
 
             elif cmd == "backward":
-                self.manager.commands.backward()
+                self.commands.backward()
                 return jsonify({
                     "status": "success",
                     "message": "Moving backward"
@@ -160,7 +125,7 @@ class WifiServer:
 
             elif cmd in ["left", "right"]:
                 angle = int(30 if cmd == "right" else -30)
-                success = self.manager.commands.turn(angle)
+                success = self.commands.turn(angle)
                 if not success:
                     return jsonify({
                         "status": "error",
@@ -172,7 +137,7 @@ class WifiServer:
                 })
 
             elif cmd == "stop":
-                self.manager.commands.cancel_movement()
+                self.commands.cancel_movement()
                 return jsonify({
                     "status": "success",
                     "message": "Stopped movement"
@@ -180,14 +145,14 @@ class WifiServer:
 
             elif cmd == "see":
                 # Create vision task in the event loop
-                self.manager.loop.call_soon_threadsafe(
+                self.loop.call_soon_threadsafe(
                     lambda: setattr(
-                        self.manager.commands.state,
+                        self.commands.state,
                         'vision_task',
-                        self.manager.loop.create_task(self.manager.commands.vision.capture_and_detect())
+                        self.loop.create_task(self.commands.vision.capture_and_detect())
                     )
                 )
-                objects = self.manager.commands.get_objects()
+                objects = self.commands.get_objects()
                 return jsonify({
                     "status": "success",
                     "message": "Vision system started. Access video stream at /video_feed",
@@ -197,10 +162,21 @@ class WifiServer:
 
             elif cmd == "blind":
                 # Create vision task in the event loop
-                self.manager.commands.stop_vision()
+                self.commands.stop_vision()
                 return jsonify({
                     "status": "success",
                     "message": "Vision system stopped"
+                })
+
+            elif cmd == "reset":
+                try:
+                    self.commands.reset()
+                except Exception as e:
+                    print(f"Reset env error: {e}")
+
+                return jsonify({
+                    "status": "success",
+                    "message": "Environment reset"
                 })
 
             else:
@@ -217,27 +193,27 @@ class WifiServer:
 
     def get_status(self):
         """Get the current status of the PicarX"""
-        if not self.manager.commands:
+        if not self.commands:
             return jsonify({
                 "status": "error",
                 "message": "Server still initializing"
             }), 503
 
         return jsonify({
-            "object_distance": self.manager.commands.get_object_distance(),
-            "emergency_stop": self.manager.commands.state.emergency_stop_flag
+            "object_distance": self.commands.get_object_distance(),
+            "emergency_stop": self.commands.state.emergency_stop_flag
         })
 
     def get_world_state(self):
         """Get the current status of the PicarX"""
-        if not self.manager.commands:
+        if not self.commands:
             return jsonify({
                 "status": "error",
                 "message": "Server still initializing"
             }), 503
 
         return jsonify({
-            "state": self.manager.commands.world_state()
+            "state": self.commands.world_state()
         })
 
     def get_visualization(self):
@@ -245,7 +221,7 @@ class WifiServer:
         if request.method == 'OPTIONS':
             return jsonify({'status': 'ok'})
 
-        if not self.manager.commands:
+        if not self.commands:
             return jsonify({
                 "status": "error",
                 "message": "Server still initializing"
@@ -253,7 +229,7 @@ class WifiServer:
 
         try:
             # Get visualization data directly from the world map
-            visualization_data = self.manager.commands.object_system.world_map.visualize()
+            visualization_data = self.commands.object_system.world_map.visualize()
 
             if visualization_data.get('visualization') is None:
                 return jsonify({
@@ -278,14 +254,12 @@ class WifiServer:
 
     def cleanup(self):
         """Cleanup function to stop all tasks and the event loop"""
-        if self.manager.commands:
-            if self.manager.commands.state.vision_task:
-                self.manager.commands.stop_vision()
-            self.manager.commands.cancel_movement()
+        if self.commands:
+            if self.commands.state.vision_task:
+                self.commands.stop_vision()
+            self.commands.cancel_movement()
 
-        # Stop the event loop
-        self.manager.loop.call_soon_threadsafe(self.manager.loop.stop)
-        self.manager.thread.join(timeout=5)  # Add timeout to prevent hanging
+        self.loop.call_soon_threadsafe(self.loop.stop)
 
 
 # for running directly

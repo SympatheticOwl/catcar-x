@@ -151,3 +151,8 @@ class Commands:
             'ascii_map': self.object_system.world_map.get_ascii_map(),
             'visualization': self.object_system.world_map.visualize(return_image=True)
         }
+
+    def reset(self):
+        self.object_system.world_map.clear_grid()
+        self.object_system.world_map.clear_scan_points()
+        self.px.reset_position()

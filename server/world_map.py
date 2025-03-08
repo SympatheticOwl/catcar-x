@@ -41,45 +41,21 @@ class WorldMap:
         self.object_threshold = 100  # Maximum distance to track objects
 
     def clear_grid(self):
-        """Reset the grid to all zeros"""
         self.grid = np.zeros((self.grid_size, self.grid_size), dtype=np.uint8)
         self.scanned_points = []
 
     def clear_scan_points(self):
-        """Clear only the scan points but preserve the grid"""
         self.scanned_points = []
 
     def polar_to_cartesian(self, angle: float, distance: float) -> Tuple[float, float]:
-        """
-        Convert polar coordinates (angle, distance) to cartesian coordinates
-
-        Args:
-            angle: Angle in degrees (0 is front, positive is right)
-            distance: Distance in cm
-
-        Returns:
-            (x, y) coordinates in cm
-        """
-        # Convert angle to radians
         angle_rad = math.radians(angle)
 
-        # Calculate cartesian coordinates
         x = distance * math.cos(angle_rad)
         y = distance * math.sin(angle_rad)
 
         return x, y
 
     def world_to_grid(self, world_x: float, world_y: float) -> Tuple[int, int]:
-        """
-        Convert world coordinates to grid indices
-
-        Args:
-            world_x: X coordinate in world space (cm)
-            world_y: Y coordinate in world space (cm)
-
-        Returns:
-            (row, col) grid indices
-        """
         # Convert to grid coordinates (car is at center)
         col = self.center_x + int(world_x / self.resolution)
         row = self.center_y - int(world_y / self.resolution)  # Y-axis is flipped in grid
@@ -91,29 +67,12 @@ class WorldMap:
         return row, col
 
     def grid_to_world(self, row: int, col: int) -> Tuple[float, float]:
-        """
-        Convert grid indices to world coordinates
-
-        Args:
-            row: Grid row
-            col: Grid column
-
-        Returns:
-            (x, y) world coordinates in cm
-        """
         world_x = (col - self.center_x) * self.resolution
         world_y = (self.center_y - row) * self.resolution
 
         return world_x, world_y
 
     def mark_obstacle(self, angle: float, distance: float):
-        """
-        Mark an obstacle on the grid
-
-        Args:
-            angle: Angle in degrees (0 is front, positive is right)
-            distance: Distance in cm
-        """
         # Only mark obstacles within threshold distance
         if distance > self.object_threshold:
             return
@@ -179,17 +138,8 @@ class WorldMap:
                     if 0 <= row < self.grid_size and 0 <= col < self.grid_size:
                         self.grid[row, col] = 1
 
+    # thank god for cs418
     def bresenham_line(self, row1: int, col1: int, row2: int, col2: int) -> List[Tuple[int, int]]:
-        """
-        Bresenham's line algorithm to find grid cells on a line
-
-        Args:
-            row1, col1: Starting point
-            row2, col2: Ending point
-
-        Returns:
-            List of (row, col) points on the line
-        """
         points = []
 
         dx = abs(col2 - col1)

@@ -27,12 +27,6 @@ def numpy_json_encoder(obj):
     return None
 
 
-# Set environment variables (same as in the Flask app)
-os.environ['QT_QPA_PLATFORM'] = 'offscreen'  # Tell Qt to not use GUI
-os.environ['OPENCV_VIDEOIO_PRIORITY_BACKEND'] = 'v4l2'  # Use V4L2 backend for OpenCV
-os.environ['MPLBACKEND'] = 'Agg'  # Force matplotlib to use Agg backend
-
-
 class BTServer:
     def __init__(self, commands: Commands):
         print("Initializing Bluetooth server...")
@@ -261,6 +255,17 @@ class BTServer:
                 return json.dumps({
                     "status": "success",
                     "message": "Stopped movement"
+                })
+
+            elif cmd == "reset":
+                try:
+                    self.commands.reset()
+                except Exception as e:
+                    print(f"Reset env error: {e}")
+
+                return json.dumps({
+                    "status": "success",
+                    "message": "Environment reset"
                 })
 
             else:
