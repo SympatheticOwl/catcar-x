@@ -110,50 +110,11 @@
         }
     });
 
-    document.getElementById('scanEnv').addEventListener('click', async function() {
-        let test = await sendCommand('scan');
-        console.log(test)
-    });
-
     // Cleanup on page unload
     window.addEventListener('beforeunload', async () => {
         if (isVideoActive) {
             clearInterval(videoInterval);
         }
         await sendCommand('stop');
-    });
-
-    document.getElementById('scanEnv').addEventListener('click', async function() {
-        try {
-            // Show loading state
-            this.disabled = true;
-            status.textContent = 'Status: Scanning environment...';
-
-            // Get the visualization data
-            const response = await fetch(`${API_URL}/visualization`);
-            const data = await response.json();
-            console.log(data)
-
-            if (data.status === 'success') {
-                // Display the ASCII map
-                const asciiMap = document.getElementById('asciiMap');
-                if (data.data.grid_data && data.data.grid_data.grid) {
-                    // Create ASCII representation
-                    const grid = data.data.grid_data.grid;
-                    const asciiRepresentation = grid.map(row =>
-                        row.map(cell => cell === 2 ? 'C' : cell === 1 ? '#' : '.').join('')
-                    ).join('\n');
-                    asciiMap.textContent = asciiRepresentation;
-                }
-
-                status.textContent = 'Status: Scan complete';
-            } else {
-                status.textContent = `Status: Error - ${data.message}`;
-            }
-        } catch (error) {
-            status.textContent = `Error: ${error.message}`;
-        } finally {
-            this.disabled = false;
-        }
     });
 </script>

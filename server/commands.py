@@ -45,20 +45,13 @@ class Commands:
         await self.object_system.scan_environment()
         print("Environment scan completed")
 
-        # Generate visualization right after scan completes
-        visualization_data = self.object_system.world_map.visualize()
-
         # Get the world state
         world_data = self.world_state()
 
         # Include visualization data in response
         return {
             "status": "success",
-            "data": {
-                "grid_data": visualization_data['grid_data'],
-                "plot_image": visualization_data['visualization'],
-                "world_state": world_data
-            }
+            "data": world_data
         }
 
     def start_vision(self):

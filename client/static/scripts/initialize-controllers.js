@@ -576,6 +576,8 @@ function setupButtonHandlers(container, isBluetooth) {
                 // Get the scan data with long timeout
                 const response = await sendCommand('scan', { timeout: 90000 }); // 90 second timeout
 
+                console.log(response)
+
                 // Hide progress indicator
                 scanProgress.style.display = 'none';
 
