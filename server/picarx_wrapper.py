@@ -55,16 +55,23 @@ class PicarXWrapper:
 
     def forward(self, speed = 30):
         """Move forward with speed tracking"""
-        self.px.forward(speed)
+        # self.px.forward(speed)
+        self.px.set_motor_speed(1, speed)
+        self.px.set_motor_speed(2, -1 * speed)
+
+
         self.__state.current_speed = self._speed_to_cm_per_sec(speed)
         self.__state.is_moving = speed != 0
         self.__state.is_backing_up = False
 
     def backward(self, speed = 30):
         """Move backward with speed tracking"""
-        self.px.backward(speed)
-        print(f'motor speed 1: {self.px.motor_speed_pins[1]}')
-        print(f'motor speed 2: {self.px.motor_speed_pins[12]}')
+        # self.px.backward(speed)
+        # print(f'motor speed 1: {self.px.motor_speed_pins[1]}')
+        # print(f'motor speed 2: {self.px.motor_speed_pins[2]}')
+
+        self.px.set_motor_speed(1, -1 * speed)
+        self.px.set_motor_speed(2, speed)
         self.__state.current_speed = -self._speed_to_cm_per_sec(speed)
         self.__state.is_moving = speed != 0
         self.__state.is_backing_up = True
