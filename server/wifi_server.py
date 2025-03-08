@@ -9,17 +9,51 @@ import asyncio
 import threading
 from commands import Commands
 
+class AsyncCommandManager:
+    def __init__(self, commands: Commands):
+        self.loop = asyncio.new_event_loop()
+        self.commands = commands
+        self.thread = threading.Thread(target=self._run_event_loop, daemon=True)
+        self.thread.start()
+
+    def _run_event_loop(self):
+        """Runs the event loop in a separate thread"""
+        asyncio.set_event_loop(self.loop)
+
+        # Initialize monitoring tasks in the event loop
+        self.loop.run_until_complete(self._initialize_commands())
+        self.loop.run_forever()
+
+    async def _initialize_commands(self):
+        """Initialize all monitoring tasks"""
+        self.commands.state.ultrasonic_task = self.loop.create_task(
+            self.commands.object_system.ultrasonic_monitoring())
+        self.commands.state.cliff_task = self.loop.create_task(
+            self.commands.object_system.cliff_monitoring())
+        self.commands.state.pos_track_task = self.loop.create_task(
+            self.commands.object_system.px.continuous_position_tracking())
+
+    def run_coroutine(self, coro):
+        """Run a coroutine in the event loop"""
+        future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+        return future.result()
+
 app = Flask(__name__)
 
 class WifiServer:
     def __init__(self, commands: Commands):
         self.commands = commands
         self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
-        self.loop.run_forever()
+        self.thread = threading.Thread(target=self._run_event_loop, daemon=True)
+        self.thread.start()
 
         self.app = app
         self.register_routes()
+
+    def _run_event_loop(self):
+        """Runs the event loop in a separate thread"""
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_forever()
 
     def register_routes(self):
         """Register all Flask routes"""
@@ -258,6 +292,7 @@ class WifiServer:
 
         # Stop the event loop
         self.loop.call_soon_threadsafe(self.loop.stop)
+        self.thread.join(timeout=5)  # Add timeout to prevent hanging
 
 
 # for running directly
