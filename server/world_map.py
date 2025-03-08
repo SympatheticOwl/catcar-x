@@ -208,8 +208,8 @@ class WorldMap:
         ax.arrow(car_col, car_row, dx, dy,
                  head_width=2, head_length=2, fc='green', ec='green')
 
-        # # Add gridlines
-        # ax.grid(True, color='gray', linestyle='-', linewidth=0.5, alpha=0.3)
+        # add gridlines
+        ax.grid(True, color='gray', linestyle='-', linewidth=0.5, alpha=0.3)
 
         center_row, center_col = self.world_to_grid(0, 0)
         ax.plot(center_col, center_row, 'kx', markersize=8)
