@@ -229,7 +229,6 @@ class BTServer:
 
             elif cmd in ["left", "right"]:
                 angle = int(30 if cmd == "right" else -30)
-                print(f'setting andle: ${angle}')
 
                 success = self.commands.turn(angle)
                 if not success:

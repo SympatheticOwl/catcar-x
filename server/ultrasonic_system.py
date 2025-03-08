@@ -163,15 +163,6 @@ class UltrasonicSystem:
             self.__state.movement_task.cancel()
             self.__state.movement_task = None
 
-    def get_world_map_visualization(self) -> Optional[str]:
-        """
-        Get base64-encoded visualization of the current world map
-
-        Returns:
-            Base64-encoded PNG image of the world map or None if visualization fails
-        """
-        return self.world_map.visualize(return_image=True)
-
     def get_current_distance(self) -> float:
         """
         Get the current distance reading

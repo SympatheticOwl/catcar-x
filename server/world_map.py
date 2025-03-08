@@ -14,31 +14,17 @@ from state_handler import State
 
 class WorldMap:
     def __init__(self, state: State, grid_size: int = 200, resolution: float = 5.0):
-        """
-        Initialize world map grid for object tracking
-
-        Args:
-            state: Shared state object
-            grid_size: Size of the grid (grid_size x grid_size)
-            resolution: Resolution of grid in cm per cell
-        """
         self.__state = state
         self.grid_size = grid_size
         self.resolution = resolution
 
-        # Create a grid centered at (grid_size/2, grid_size/2)
-        # 0 = unknown/free, 1 = obstacle
         self.grid = np.zeros((grid_size, grid_size), dtype=np.uint8)
 
-        # Center point (car's position in grid coordinates)
         self.center_x = grid_size // 2
         self.center_y = grid_size // 2
 
-        # Track scanned points for visualization
         self.scanned_points = []
-
-        # Object detection threshold (cm)
-        self.object_threshold = 100  # Maximum distance to track objects
+        self.object_threshold = 100
 
     def clear_grid(self):
         self.grid = np.zeros((self.grid_size, self.grid_size), dtype=np.uint8)
@@ -56,9 +42,8 @@ class WorldMap:
         return x, y
 
     def world_to_grid(self, world_x: float, world_y: float) -> Tuple[int, int]:
-        # Convert to grid coordinates (car is at center)
         col = self.center_x + int(world_x / self.resolution)
-        row = self.center_y - int(world_y / self.resolution)  # Y-axis is flipped in grid
+        row = self.center_y - int(world_y / self.resolution)
 
         # Ensure within grid bounds
         col = max(0, min(col, self.grid_size - 1))
@@ -73,29 +58,22 @@ class WorldMap:
         return world_x, world_y
 
     def mark_obstacle(self, angle: float, distance: float):
-        # Only mark obstacles within threshold distance
         if distance > self.object_threshold:
             return
 
-        # Convert to world coordinates (relative to car)
         world_x, world_y = self.polar_to_cartesian(angle, distance)
 
-        # Account for car's position and orientation
         heading_rad = math.radians(self.__state.heading)
         rotated_x = world_x * math.cos(heading_rad) - world_y * math.sin(heading_rad)
         rotated_y = world_x * math.sin(heading_rad) + world_y * math.cos(heading_rad)
 
-        # Add car's position offset
         abs_x = self.__state.x + rotated_x
         abs_y = self.__state.y + rotated_y
 
-        # Convert to grid coordinates
         row, col = self.world_to_grid(abs_x, abs_y)
 
-        # Mark as obstacle in grid
         self.grid[row, col] = 1
 
-        # Store point for visualization
         self.scanned_points.append({
             'angle': angle,
             'distance': distance,
@@ -106,9 +84,6 @@ class WorldMap:
         })
 
     def interpolate_obstacles(self):
-        """
-        Interpolate between scanned points to create continuous obstacles
-        """
         if len(self.scanned_points) < 2:
             return
 
@@ -138,7 +113,8 @@ class WorldMap:
                     if 0 <= row < self.grid_size and 0 <= col < self.grid_size:
                         self.grid[row, col] = 1
 
-    # thank god for cs418
+    # https://cs418.cs.illinois.edu/website/text/dda.html
+    # my god though, python is horrendously slow at this
     def bresenham_line(self, row1: int, col1: int, row2: int, col2: int) -> List[Tuple[int, int]]:
         points = []
 
@@ -173,21 +149,12 @@ class WorldMap:
         return points
 
     async def scan_surroundings(self, sensor_func: Callable):
-        """
-        Scan surroundings using the ultrasonic sensor
-
-        Args:
-            sensor_func: Async function that takes an angle and returns distance
-        """
-        # Only clear the scan points but preserve the grid
         self.clear_scan_points()
 
-        # Define scan range and step from state
         scan_range = range(self.__state.scan_range[0],
                            self.__state.scan_range[1] + 1,
                            self.__state.scan_step)
 
-        # Perform scan
         for angle in scan_range:
             distance = await sensor_func(angle)
 
@@ -195,17 +162,15 @@ class WorldMap:
             if distance is None or distance <= 0:
                 continue
 
-            # Mark obstacle on grid
             self.mark_obstacle(angle, distance)
 
-        # Interpolate to create continuous obstacles
         self.interpolate_obstacles()
 
     def get_ascii_map(self) -> str:
         grid_copy = self.grid.copy()
 
         car_row, car_col = self.world_to_grid(self.__state.x, self.__state.y)
-        grid_copy[car_row, car_col] = 2  # 2 represents car
+        grid_copy[car_row, car_col] = 2 # car
 
         result = ""
         for row in range(self.grid_size):
@@ -222,22 +187,19 @@ class WorldMap:
         return result
 
     def visualize(self, return_image: bool = False) -> Dict:
-        # Create a copy of the grid for visualization
         grid_viz = self.grid.copy()
 
         # Mark car's position
         car_row, car_col = self.world_to_grid(self.__state.x, self.__state.y)
-        grid_viz[car_row, car_col] = 2  # Car is represented as 2
+        grid_viz[car_row, car_col] = 2
 
-        # Create plot
         fig, ax = plt.subplots(figsize=(8, 8))
 
-        # Create a custom colormap for better visibility
         # 0=white (empty), 1=red (obstacle), 2=blue (car)
         cmap = ListedColormap(['white', 'red', 'blue'])
 
         # Display the grid
-        im = ax.imshow(grid_viz, cmap=cmap, vmin=0, vmax=2)
+        ax.imshow(grid_viz, cmap=cmap, vmin=0, vmax=2)
 
         # Add heading indicator
         heading_rad = math.radians(self.__state.heading)
@@ -246,10 +208,9 @@ class WorldMap:
         ax.arrow(car_col, car_row, dx, dy,
                  head_width=2, head_length=2, fc='green', ec='green')
 
-        # Add gridlines
-        ax.grid(True, color='gray', linestyle='-', linewidth=0.5, alpha=0.3)
+        # # Add gridlines
+        # ax.grid(True, color='gray', linestyle='-', linewidth=0.5, alpha=0.3)
 
-        # Mark the grid center (0,0 in world coordinates)
         center_row, center_col = self.world_to_grid(0, 0)
         ax.plot(center_col, center_row, 'kx', markersize=8)
 
@@ -269,7 +230,6 @@ class WorldMap:
         ax.set_title(
             f"World Map (Pos: {self.__state.x:.1f}, {self.__state.y:.1f}, Heading: {self.__state.heading:.1f}°)")
 
-        # Create custom legend instead of colorbar
         legend_elements = [
             Patch(facecolor='white', edgecolor='gray', label='Empty'),
             Patch(facecolor='red', edgecolor='gray', label='Obstacle'),
@@ -279,7 +239,6 @@ class WorldMap:
         ax.legend(handles=legend_elements, loc='upper right',
                   bbox_to_anchor=(1.0, 1.0), fontsize='small')
 
-        # Return as base64 if requested
         img_data = None
         if return_image:
             buf = io.BytesIO()

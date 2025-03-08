@@ -263,12 +263,12 @@ function updateTelemetryDisplay(elements, telemetry) {
             elements.batteryVoltage.textContent = 'N/A';
         }
 
-        // Update charging status
-        if (battery.is_charging !== null && elements.batteryStatus) {
-            elements.batteryStatus.textContent = battery.is_charging ? 'Charging' : 'Discharging';
-        } else if (elements.batteryStatus) {
-            elements.batteryStatus.textContent = battery.available ? 'Unknown' : 'Not Available';
-        }
+        // does not work right now
+        // if (battery.is_charging !== null && elements.batteryStatus) {
+        //     elements.batteryStatus.textContent = battery.is_charging ? 'Charging' : 'Discharging';
+        // } else if (elements.batteryStatus) {
+        //     elements.batteryStatus.textContent = battery.available ? 'Unknown' : 'Not Available';
+        // }
     }
 
     // Update system information
