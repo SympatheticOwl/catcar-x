@@ -469,6 +469,8 @@ function setupButtonHandlers(container, isBluetooth) {
     setupButton('down', 'backward');
     setupButton('left', 'left', -30);
     setupButton('right', 'right', 30);
+    setupButton('resetEnv', 'reset');
+
 
     // Setup scan environment button
     const scanEnvBtn = container.querySelector('#scanEnv');

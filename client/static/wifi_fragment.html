@@ -1,4 +1,44 @@
-<h1>Wifi Controller</h1>
+<script>
+    function switchEnvTab(tab) {
+        const videoContainer = document.getElementById('videoContainer');
+        const mapContainer = document.getElementById('mapContainer');
+
+        // Update button active states
+        document.getElementById('video-btn').classList.toggle('active', tab === 'video');
+        document.getElementById('map-btn').classList.toggle('active', tab === 'map');
+
+        // Reset the layout
+        videoContainer.style.display = 'block';
+        mapContainer.style.display = 'block';
+
+        // Apply the selected tab view
+        if (tab === 'video') {
+            mapContainer.style.display = 'none'
+        } else {
+            videoContainer.style.display = 'none'
+        }
+    }
+
+    function switchMapTab(tab) {
+        const plotContainer = document.getElementById('plotContainer');
+        const asciiContainer = document.getElementById('asciiContainer');
+
+        // Update button active states
+        document.getElementById('plot-btn').classList.toggle('active', tab === 'plot');
+        document.getElementById('ascii-btn').classList.toggle('active', tab === 'ascii');
+
+        // Reset the layout
+        plotContainer.style.display = 'block';
+        asciiContainer.style.display = 'block';
+
+        // Apply the selected tab view
+        if (tab === 'plot') {
+            asciiContainer.style.display = 'none'
+        } else {
+            plotContainer.style.display = 'none'
+        }
+    }
+</script>
 
 <div id="status">Status: Ready</div>
 
@@ -8,22 +48,36 @@
     <button id="right">→</button>
     <button id="down">↓</button>
 </div>
-
-<div class="button-row">
-    <button id="scanEnv">Scan Environment</button>
+<div class="tab-buttons">
+    <button id="video-btn" class="tab-button active" onclick="switchEnvTab('video')">Video</button>
+    <button id="map-btn" class="tab-button" onclick="switchEnvTab('map')">Map</button>
 </div>
 
-<div class="button-row">
-    <button id="toggleVideo">Start Video Feed</button>
-</div>
-
-<div id="videoContainer">
+<!-- Video container -->
+<div id="videoContainer" class="controller-panel">
+    <div class="button-row centered">
+        <button id="toggleVideo">Start Video Feed</button>
+    </div>
     <img id="videoFeed" style="display: none;">
 </div>
-<div id="mapContainer" style="margin: 20px auto; text-align: center;">
+
+<!-- Environment data container -->
+<div id="mapContainer" class="controller-panel" style="display: none;">
     <h2>Environment Map</h2>
-    <img id="mapVisualization" style="max-width: 100%; margin-top: 10px;">
-    <pre id="asciiMap" style="text-align: left; font-family: monospace; overflow-x: auto;"></pre>
+    <div class="button-row centered">
+        <button id="resetEnv">Reset Environment</button>
+        <button id="scanEnv">Scan Environment</button>
+    </div>
+    <div class="tab-buttons">
+        <button id="plot-btn" class="tab-button active" onclick="switchMapTab('plot')">Plot Map</button>
+        <button id="ascii-btn" class="tab-button" onclick="switchMapTab('ascii')">ASCII Map</button>
+    </div>
+    <div id="plotContainer" style="display: none;">
+        <img id="mapVisualization" style="max-width: 100%; margin-top: 10px; justify-self: center">
+    </div>
+    <div id="asciiContainer" class="centered" style="display: none;">
+        <pre id="asciiMap" style="text-align: left; font-family: monospace; overflow-x: auto; display: none;"></pre>
+    </div>
 </div>
 
 
@@ -32,6 +86,7 @@
     // const API_URL = 'http://192.168.0.163:8000';
     const status = document.getElementById('status');
     const videoFeed = document.getElementById('videoFeed');
+
     let isVideoActive = false;
 
     async function sendCommand(cmd, options = {}) {
@@ -51,13 +106,12 @@
 
     // Handle button press and release
     function setupButton(id, pressCommand, angle = null) {
-        console.log(id, pressCommand, angle)
         const button = document.getElementById(id);
 
         // Touch events
         button.addEventListener('touchstart', async (e) => {
             e.preventDefault();
-            await sendCommand(pressCommand, { angle });
+            await sendCommand(pressCommand, {angle});
         });
 
         button.addEventListener('touchend', async (e) => {
@@ -67,7 +121,7 @@
 
         // Mouse events
         button.addEventListener('mousedown', async () => {
-            await sendCommand(pressCommand, { angle });
+            await sendCommand(pressCommand, {angle});
         });
 
         button.addEventListener('mouseup', async () => {
@@ -88,7 +142,7 @@
 
     // Video feed handling
     let videoInterval;
-    document.getElementById('toggleVideo').addEventListener('click', async function() {
+    document.getElementById('toggleVideo').addEventListener('click', async function () {
         if (!isVideoActive) {
             // Start video
             await sendCommand('see');
@@ -99,15 +153,48 @@
             videoInterval = setInterval(async () => {
                 const timestamp = new Date().getTime();
                 videoFeed.src = `${API_URL}/video_feed?t=${timestamp}`;
-            }, 100);
+            }, 25);
 
             isVideoActive = true;
         } else {
             // Stop video
+            await sendCommand('blind');
             clearInterval(videoInterval);
             videoFeed.style.display = 'none';
             this.textContent = 'Start Video Feed';
             isVideoActive = false;
+        }
+    });
+
+    // Setup scan environment button
+    document.getElementById('scanEnv').addEventListener('click', async function () {
+        try {
+            this.disabled = true;
+            status.textContent = 'Status: Scanning environment... (this may take up to 30 seconds)';
+
+            // Get the scan data with timeout
+            const response = await sendCommand('scan');
+            console.log(response);
+
+            this.disabled = false;
+
+            if (response && response.status === 'success') {
+                // Display the matplotlib visualization
+                if (response.data && response.data.visualization && response.data.visualization.plot) {
+                    document.getElementById('mapVisualization').src = `data:image/png;base64,${response.data.visualization.plot}`;
+                }
+
+                // Store the ASCII map
+                if (response.data && response.data.ascii_map) {
+                    document.getElementById("asciiMap").textContent = response.data.ascii_map;
+                }
+
+                status.textContent = 'Status: Scan complete';
+            }
+        } catch (error) {
+            console.error("Scan error:", error);
+            this.disabled = false;
+            status.textContent = `Error: ${error.message}`;
         }
     });
 
