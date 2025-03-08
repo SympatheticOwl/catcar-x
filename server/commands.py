@@ -1,8 +1,6 @@
 import time
-from typing import List, Dict, Tuple
 import numpy as np
 import asyncio
-import math
 
 from state_handler import State
 from streaming_vision_system import VisionSystem

@@ -23,7 +23,18 @@ class WifiServer:
 
     def _run_event_loop(self):
         asyncio.set_event_loop(self.loop)
+
+        # wifi server will handle tracking the position task
+        self.loop.run_until_complete(self._initialize_commands())
         self.loop.run_forever()
+
+    async def _initialize_commands(self):
+        self.commands.state.ultrasonic_task = self.loop.create_task(
+            self.commands.object_system.ultrasonic_monitoring())
+        self.commands.state.cliff_task = self.loop.create_task(
+            self.commands.object_system.cliff_monitoring())
+        self.commands.state.pos_track_task = self.loop.create_task(
+            self.commands.object_system.px.continuous_position_tracking())
 
     def register_routes(self):
         self.app.after_request(self.after_request)

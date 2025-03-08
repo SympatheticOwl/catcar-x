@@ -84,7 +84,6 @@ class BTClient:
             return False
 
     def _send_ping(self):
-        """Send a simple ping command to ensure connection is working"""
         try:
             ping_cmd = json.dumps({
                 "endpoint": "ping",
@@ -103,7 +102,6 @@ class BTClient:
             return False
 
     def disconnect(self):
-        """Disconnect from the Raspberry Pi"""
         if self.client:
             try:
                 self.client.disconnect()
@@ -120,7 +118,6 @@ class BTClient:
             self.last_command_id = None
 
     def process_data_chunk(self, data_chunk):
-        """Process a chunk of binary data received from the Pi"""
         try:
             # Convert binary data to string if needed
             if isinstance(data_chunk, bytes):
@@ -363,7 +360,6 @@ class BTClient:
             traceback.print_exc()
 
     def data_received(self, data):
-        """Handle data received from the Raspberry Pi"""
         print(f"DATA RECEIVED: {len(data)} bytes")
         if isinstance(data, bytes):
             first_bytes = data[:20].hex()
@@ -372,7 +368,6 @@ class BTClient:
         self.process_data_chunk(data)
 
     def handle_response(self, response):
-        """Process a complete response object"""
         try:
             print(f"Handling response of type: {type(response)}")
             try:
@@ -517,7 +512,6 @@ bt_client = BTClient()
 
 @app.route('/')
 def index():
-    """Serve the composite HTML page that includes both controllers"""
     return send_from_directory('static', 'index.html')
 
 
@@ -583,14 +577,12 @@ def connect():
 
 @app.route('/disconnect', methods=['POST'])
 def disconnect():
-    """Disconnect from the Raspberry Pi"""
     bt_client.disconnect()
     return jsonify({"status": "success", "message": "Disconnected from Raspberry Pi"})
 
 
 @app.route('/command/<cmd>', methods=['POST'])
 def execute_command(cmd):
-    """Forward commands to the Raspberry Pi"""
     if not bt_client.connected:
         return jsonify({"status": "error", "message": "Not connected to Raspberry Pi"}), 400
 
@@ -611,7 +603,6 @@ def execute_command(cmd):
 
 @app.route('/status', methods=['GET'])
 def get_status():
-    """Get the current status of the PicarX"""
     if not bt_client.connected:
         return jsonify({"status": "error", "message": "Not connected to Raspberry Pi"}), 400
 
@@ -621,7 +612,6 @@ def get_status():
 
 @app.route('/telemetry', methods=['GET'])
 def get_telemetry():
-    """Get all telemetry data from the PicarX"""
     if not bt_client.connected:
         return jsonify({"status": "error", "message": "Not connected to Raspberry Pi"}), 400
 
@@ -633,7 +623,6 @@ def get_telemetry():
 
 @app.route('/telemetry/battery', methods=['GET'])
 def get_battery():
-    """Get battery information from the PicarX"""
     if not bt_client.connected:
         return jsonify({"status": "error", "message": "Not connected to Raspberry Pi"}), 400
 
@@ -644,7 +633,6 @@ def get_battery():
 
 @app.route('/telemetry/temperature', methods=['GET'])
 def get_temperature():
-    """Get CPU temperature from the PicarX"""
     if not bt_client.connected:
         return jsonify({"status": "error", "message": "Not connected to Raspberry Pi"}), 400
 
