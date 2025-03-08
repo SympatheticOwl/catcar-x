@@ -11,12 +11,12 @@ from commands import Commands
 
 app = Flask(__name__)
 
-
 class WifiServer:
     def __init__(self, commands: Commands):
         self.commands = commands
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
+        self.loop.run_forever()
 
         self.app = app
         self.register_routes()
@@ -73,16 +73,13 @@ class WifiServer:
             }), 503
 
         try:
-            # Create async task to perform scan
             future = asyncio.run_coroutine_threadsafe(
                 self.commands.scan_env(),
                 self.loop
             )
 
-            # Get the result with timeout
             result = future.result(timeout=30)
 
-            # Return scan result which includes visualization data
             return jsonify(result)
         except asyncio.TimeoutError:
             return jsonify({
