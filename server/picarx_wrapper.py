@@ -56,7 +56,7 @@ class PicarXWrapper:
     def forward(self, speed = 30):
         """Move forward with speed tracking"""
         # self.px.forward(speed)
-        self.px.set_motor_speed(1, speed)
+        self.px.set_motor_speed(1, speed + 5)
         self.px.set_motor_speed(2, -1 * speed)
 
 
