@@ -10,7 +10,7 @@ class State:
         self.is_cliff = False
         self.emergency_stop_flag = False
         self.vision_clear = True
-        self.speed = 80
+        self.speed = 45
 
         # Position tracking
         self.x = 0.0  # cm
