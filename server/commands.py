@@ -153,6 +153,5 @@ class Commands:
         }
 
     def reset(self):
-        self.object_system.world_map.clear_grid()
-        self.object_system.world_map.clear_scan_points()
+        self.object_system.reset()
         self.px.reset_position()

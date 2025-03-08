@@ -180,3 +180,9 @@ class UltrasonicSystem:
             Current ultrasonic distance in cm
         """
         return self.__state.current_distance
+
+    def reset(self):
+        self.scan_count = 0
+        self.recent_readings = []
+        self.world_map.clear_grid()
+        self.world_map.clear_scan_points()

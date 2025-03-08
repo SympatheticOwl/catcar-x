@@ -3,7 +3,7 @@
  */
 
 // Listen for HTMX events
-document.addEventListener('htmx:afterSwap', function(event) {
+document.addEventListener('htmx:afterSwap', function (event) {
     console.log('HTMX swap completed for:', event.target.id);
 
     // Initialize Bluetooth controller if it was just loaded
@@ -11,19 +11,19 @@ document.addEventListener('htmx:afterSwap', function(event) {
         initializeBluetoothController();
     }
 
-    // Initialize WiFi controller if it was just loaded
+    // Initialize Wifi controller if it was just loaded
     if (event.target.id === 'wifi-content' || event.detail.target.id === 'wifi-content') {
         initializeWifiController();
     }
 });
 
 // Handle custom events from server
-document.addEventListener('bt-controller-loaded', function() {
+document.addEventListener('bt-controller-loaded', function () {
     console.log('bt-controller-loaded event triggered');
     initializeBluetoothController();
 });
 
-document.addEventListener('wifi-controller-loaded', function() {
+document.addEventListener('wifi-controller-loaded', function () {
     console.log('wifi-controller-loaded event triggered');
     initializeWifiController();
 });
@@ -49,7 +49,7 @@ function initializeBluetoothController() {
     initializeTelemetry(btContainer, true);
 
     // Re-initialize any additional Bluetooth-specific functionality
-    const btStatus = btContainer.querySelector('#status') || btContainer.querySelector('#bt-status');
+    const btStatus = getStatus(btContainer, 'bt');
     if (btStatus) {
         btStatus.textContent = 'Status: Bluetooth controller ready';
     }
@@ -57,7 +57,7 @@ function initializeBluetoothController() {
     console.log('Bluetooth controller initialized');
 }
 
-// Initialize WiFi controller
+// Initialize wifi controller
 function initializeWifiController() {
     console.log('Initializing WiFi controller...');
 
@@ -67,19 +67,16 @@ function initializeWifiController() {
         return;
     }
 
-    // Re-initialize all event listeners and components
+    // reinit all event listeners and components
     setupButtonHandlers(wifiContainer, false);
 
-    // Initialize telemetry components for WiFi if needed
-    initializeTelemetry(wifiContainer, false);
-
-    // Re-initialize any additional WiFi-specific functionality
-    const wifiStatus = wifiContainer.querySelector('#status') || wifiContainer.querySelector('#wifi-status');
+    // reinit any additional wifi-specific functionality
+    const wifiStatus = getStatus(wifiContainer, 'wifi');
     if (wifiStatus) {
-        wifiStatus.textContent = 'Status: WiFi controller ready';
+        wifiStatus.textContent = 'Status: Wifi controller ready';
     }
 
-    console.log('WiFi controller initialized');
+    console.log('Wifi controller initialized');
 }
 
 // Initialize telemetry components and functionality
@@ -128,7 +125,7 @@ function initializeTelemetry(container, isBluetooth) {
 
     if (connectButton) {
         // Add event to start telemetry updates on successful connection
-        connectButton.addEventListener('click', function() {
+        connectButton.addEventListener('click', function () {
             // We need to check if connection was successful
             setTimeout(() => {
                 const connectionStatus = container.querySelector('#connectionStatus');
@@ -141,7 +138,7 @@ function initializeTelemetry(container, isBluetooth) {
 
     if (disconnectButton) {
         // Stop telemetry updates on disconnect
-        disconnectButton.addEventListener('click', function() {
+        disconnectButton.addEventListener('click', function () {
             stopTelemetryUpdates();
             resetTelemetryDisplay(elements);
         });
@@ -190,23 +187,23 @@ function fetchTelemetry(apiUrl, elements) {
     fetch(`${apiUrl}/telemetry`, {
         signal: controller.signal
     })
-    .then(response => response.json())
-    .then(data => {
-        clearTimeout(timeoutId);
-        if (data.status === 'success' && data.telemetry) {
-            updateTelemetryDisplay(elements, data.telemetry);
-        } else {
-            console.error('Error fetching telemetry:', data.message || 'Unknown error');
-        }
-    })
-    .catch(error => {
-        clearTimeout(timeoutId);
-        if (error.name === 'AbortError') {
-            console.log('Telemetry request timed out');
-        } else {
-            console.error('Error fetching telemetry:', error);
-        }
-    });
+        .then(response => response.json())
+        .then(data => {
+            clearTimeout(timeoutId);
+            if (data.status === 'success' && data.telemetry) {
+                updateTelemetryDisplay(elements, data.telemetry);
+            } else {
+                console.error('Error fetching telemetry:', data.message || 'Unknown error');
+            }
+        })
+        .catch(error => {
+            clearTimeout(timeoutId);
+            if (error.name === 'AbortError') {
+                console.log('Telemetry request timed out');
+            } else {
+                console.error('Error fetching telemetry:', error);
+            }
+        });
 }
 
 // Function to update telemetry display with new data
@@ -357,9 +354,8 @@ function setupButtonHandlers(container, isBluetooth) {
     if (!container) return;
 
     // Get API base URL based on controller type
-    // IMPORTANT: For WiFi controller, we must use the hardcoded URL from the original controller
     const apiUrl = isBluetooth ? window.location.origin : 'http://10.0.0.219:8000';
-    console.log(`Using API URL for ${isBluetooth ? 'Bluetooth' : 'WiFi'} controller: ${apiUrl}`);
+    console.log(`Using API URL for ${isBluetooth ? 'Bluetooth' : 'Wifi'} controller: ${apiUrl}`);
 
     // Helper function for making API calls with timeout support
     async function sendCommand(cmd, options = {}) {
@@ -367,10 +363,10 @@ function setupButtonHandlers(container, isBluetooth) {
             console.log(`Sending ${cmd} command to ${apiUrl}`);
 
             let url;
-            let fetchOptions = { method: 'POST' };
+            let fetchOptions = {method: 'POST'};
 
             const controller = new AbortController();
-            const timeoutMs = options.timeout || (cmd === 'scan' ? 90000 : 30000); // Use longer timeout for scan
+            const timeoutMs = 30000;
             const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
             fetchOptions.signal = controller.signal;
 
@@ -407,7 +403,6 @@ function setupButtonHandlers(container, isBluetooth) {
         }
     }
 
-    // Setup control buttons
     const setupButton = (id, pressCommand, angle = null) => {
         const button = container.querySelector(`#${id}`);
         if (!button) return;
@@ -418,13 +413,12 @@ function setupButtonHandlers(container, isBluetooth) {
 
         let isPressed = false;
 
-        // Touch events
         newButton.addEventListener('touchstart', async (e) => {
             e.preventDefault();
             if (!isPressed) {
                 isPressed = true;
                 newButton.classList.add('active');
-                await sendCommand(pressCommand, { angle });
+                await sendCommand(pressCommand, {angle});
             }
         });
 
@@ -442,7 +436,7 @@ function setupButtonHandlers(container, isBluetooth) {
             if (!isPressed) {
                 isPressed = true;
                 newButton.classList.add('active');
-                await sendCommand(pressCommand, { angle });
+                await sendCommand(pressCommand, {angle});
             }
         });
 
@@ -469,8 +463,6 @@ function setupButtonHandlers(container, isBluetooth) {
     setupButton('down', 'backward');
     setupButton('left', 'left', -30);
     setupButton('right', 'right', 30);
-    setupButton('resetEnv', 'reset');
-
 
     // Setup scan environment button
     const scanEnvBtn = container.querySelector('#scanEnv');
@@ -485,7 +477,7 @@ function setupButtonHandlers(container, isBluetooth) {
             scanProgress.id = 'scanProgress';
             scanProgress.style.display = 'none';
             scanProgress.style.marginLeft = '10px';
-            scanProgress.innerHTML = '<span class="spinner"></span> Scanning... This may take up to 30 seconds';
+            scanProgress.innerHTML = '<span class="spinner"></span> Scanning...';
             newScanBtn.parentNode.appendChild(scanProgress);
 
             // Add spinner style if needed
@@ -511,7 +503,7 @@ function setupButtonHandlers(container, isBluetooth) {
             }
         }
 
-        newScanBtn.addEventListener('click', async function() {
+        newScanBtn.addEventListener('click', async function () {
             try {
                 this.disabled = true;
                 scanProgress.style.display = 'inline-block';
@@ -523,13 +515,17 @@ function setupButtonHandlers(container, isBluetooth) {
 
                 // Clear previous visualization
                 const mapImg = container.querySelector('#mapVisualization');
-                if (mapImg) mapImg.style.display = 'none';
+                if (mapImg) {
+                    mapImg.style.display = 'none';
+                }
 
                 const asciiMap = container.querySelector('#asciiMap');
-                if (asciiMap) asciiMap.style.display = 'none';
+                if (asciiMap) {
+                    asciiMap.style.display = 'none';
+                }
 
                 // Get the scan data with long timeout
-                const response = await sendCommand('scan', { timeout: 90000 }); // 90 second timeout
+                const response = await sendCommand('scan', {timeout: 90000}); // 90 second timeout
 
                 console.log(response)
 
@@ -562,6 +558,29 @@ function setupButtonHandlers(container, isBluetooth) {
         });
     }
 
+    const resetEnvBtn = container.querySelector('#resetEnv');
+    if (resetEnvBtn) {
+        const newResetBtn = resetEnvBtn.cloneNode(true);
+        resetEnvBtn.parentNode.replaceChild(newResetBtn, resetEnvBtn);
+
+        // Touch events
+        newResetBtn.addEventListener('click', async (e) => {
+            console.log("RESET")
+            e.preventDefault();
+            newResetBtn.classList.add('active');
+            await sendCommand('reset');
+            const mapImg = container.querySelector('#mapVisualization');
+            if (mapImg) {
+                mapImg.style.display = 'none';
+            }
+
+            const asciiMap = container.querySelector('#asciiMap');
+            if (asciiMap) {
+                asciiMap.style.display = 'none';
+            }
+        });
+    }
+
     // Setup video feed button
     const toggleVideoBtn = container.querySelector('#toggleVideo');
     const videoFeed = container.querySelector('#videoFeed');
@@ -573,24 +592,16 @@ function setupButtonHandlers(container, isBluetooth) {
         let isVideoActive = false;
         let videoInterval;
 
-        newToggleBtn.addEventListener('click', async function() {
+        newToggleBtn.addEventListener('click', async function () {
             if (!isVideoActive) {
                 // Start video
                 await sendCommand('see');
                 videoFeed.style.display = 'block';
-                this.textContent = 'Stop Video Feed';
 
-                if (isBluetooth) {
-                    // For Bluetooth, set source directly to streaming endpoint
+                videoInterval = setInterval(() => {
                     const timestamp = new Date().getTime();
                     videoFeed.src = `${apiUrl}/video_feed?t=${timestamp}`;
-                } else {
-                    // For WiFi, poll for new frames
-                    videoInterval = setInterval(() => {
-                        const timestamp = new Date().getTime();
-                        videoFeed.src = `${apiUrl}/video_feed?t=${timestamp}`;
-                    }, 100);
-                }
+                }, 100);
 
                 isVideoActive = true;
             } else {
@@ -603,7 +614,6 @@ function setupButtonHandlers(container, isBluetooth) {
 
                 videoFeed.style.display = 'none';
                 videoFeed.src = '';
-                this.textContent = 'Start Video Feed';
                 isVideoActive = false;
             }
         });
@@ -625,7 +635,7 @@ function setupButtonHandlers(container, isBluetooth) {
             disconnectBtn.parentNode.replaceChild(newDisconnectBtn, disconnectBtn);
 
             // Reconnect event listeners
-            newConnectBtn.addEventListener('click', async function() {
+            newConnectBtn.addEventListener('click', async function () {
                 const address = btAddressInput.value.trim();
                 if (!address) {
                     if (container.querySelector('#status')) {
@@ -644,7 +654,7 @@ function setupButtonHandlers(container, isBluetooth) {
                         headers: {
                             'Content-Type': 'application/json'
                         },
-                        body: JSON.stringify({ bt_address: address })
+                        body: JSON.stringify({bt_address: address})
                     });
 
                     const data = await response.json();
@@ -703,7 +713,7 @@ function setupButtonHandlers(container, isBluetooth) {
                 }
             });
 
-            newDisconnectBtn.addEventListener('click', async function() {
+            newDisconnectBtn.addEventListener('click', async function () {
                 try {
                     const response = await fetch(`${apiUrl}/disconnect`, {
                         method: 'POST'
@@ -769,7 +779,7 @@ function setupButtonHandlers(container, isBluetooth) {
     }
 
     // Add keyboard controls
-    document.addEventListener('keydown', function(event) {
+    document.addEventListener('keydown', function (event) {
         // Only handle keyboard events if this controller is active
         if (!container.contains(document.activeElement) &&
             !container.matches(':focus-within') &&
@@ -814,7 +824,7 @@ function setupButtonHandlers(container, isBluetooth) {
         }
     });
 
-    document.addEventListener('keyup', function(event) {
+    document.addEventListener('keyup', function (event) {
         // Only handle keyboard events if this controller is active
         if (!container.contains(document.activeElement) &&
             !container.matches(':focus-within') &&
@@ -854,4 +864,9 @@ function setupButtonHandlers(container, isBluetooth) {
             }));
         }
     });
+}
+
+function getStatus(container, type) {
+    return container.querySelector('#status') || container.querySelector(`#${type}-status`);
+
 }
