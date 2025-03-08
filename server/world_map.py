@@ -366,6 +366,5 @@ class WorldMap:
 
         return {
             'grid_data': self.grid.tolist(),
-            'car_position': [self.__state.x, self.__state.y, self.__state.heading],
-            'visualization': img_data
+            'plot': img_data
         }

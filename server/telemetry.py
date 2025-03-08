@@ -254,6 +254,6 @@ class Telemetry:
             "timestamp": time.time()
         }
 
-        print(f"Telemetry data: {data}")
+        # print(f"Telemetry data: {data}")
 
         return data

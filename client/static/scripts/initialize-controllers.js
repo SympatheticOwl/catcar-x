@@ -583,19 +583,14 @@ function setupButtonHandlers(container, isBluetooth) {
 
                 if (response && response.status === 'success') {
                     // Display the matplotlib visualization
-                    if (mapImg && response.data && response.data.plot_image) {
-                        mapImg.src = `data:image/png;base64,${response.data.plot_image}`;
+                    if (mapImg && response.data && response.data.visualization.plot) {
+                        mapImg.src = `data:image/png;base64,${response.data.visualization.plot}`;
                         mapImg.style.display = 'block';
                     }
 
                     // Display the ASCII map
-                    if (asciiMap && response.data && response.data.grid_data && response.data.grid_data.grid) {
-                        // Create ASCII representation
-                        const grid = response.data.grid_data.grid;
-                        const asciiRepresentation = grid.map(row =>
-                            row.map(cell => cell === 2 ? 'C' : cell === 1 ? '#' : '.').join('')
-                        ).join('\n');
-                        asciiMap.textContent = asciiRepresentation;
+                    if (asciiMap && response.data && response.data.ascii_map) {
+                        asciiMap.textContent = response.data.ascii_map;
                         asciiMap.style.display = 'block';
                     }
 
