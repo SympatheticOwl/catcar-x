@@ -26,11 +26,11 @@ class Commands:
         self.state.cliff_task = None
         self.state.pos_track_task = None
 
-    # def __post_init__(self):
-    #     print('commands post init...')
-    #     self.state.ultrasonic_task = asyncio.create_task(self.object_system.ultrasonic_monitoring())
-    #     self.state.cliff_task = asyncio.create_task(self.object_system.cliff_monitoring())
-    #     self.state.pos_track_task = asyncio.create_task(self.object_system.px.continuous_position_tracking())
+    def __post_init__(self):
+        print('commands post init...')
+        self.state.ultrasonic_task = asyncio.create_task(self.object_system.ultrasonic_monitoring())
+        self.state.cliff_task = asyncio.create_task(self.object_system.cliff_monitoring())
+        self.state.pos_track_task = asyncio.create_task(self.object_system.px.continuous_position_tracking())
 
     async def scan_env(self):
         # Perform a scan
