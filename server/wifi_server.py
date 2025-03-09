@@ -9,66 +9,67 @@ import asyncio
 import threading
 from commands import Commands
 
-class AsyncCommandManager:
+# class AsyncCommandManager:
+#     def __init__(self, commands: Commands):
+#         self.loop = asyncio.new_event_loop()
+#         self.commands = commands
+#         self.thread = threading.Thread(target=self._run_event_loop, daemon=True)
+#         self.thread.start()
+#
+#     def _run_event_loop(self):
+#         """Runs the event loop in a separate thread"""
+#         asyncio.set_event_loop(self.loop)
+#
+#         # Initialize monitoring tasks in the event loop
+#         self.loop.run_until_complete(self._initialize_commands())
+#         self.loop.run_forever()
+#
+#     async def _initialize_commands(self):
+#         """Initialize all monitoring tasks"""
+#         self.commands.state.ultrasonic_task = self.loop.create_task(
+#             self.commands.object_system.ultrasonic_monitoring())
+#         self.commands.state.cliff_task = self.loop.create_task(
+#             self.commands.object_system.cliff_monitoring())
+#         self.commands.state.pos_track_task = self.loop.create_task(
+#             self.commands.object_system.px.continuous_position_tracking())
+#
+#     def run_coroutine(self, coro):
+#         """Run a coroutine in the event loop"""
+#         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+#         return future.result()
+#
+#     # Delegate other Picarx methods to the base class
+#     def __getattr__(self, attr):
+#         return getattr(self.commands, attr)
+
+app = Flask(__name__)
+
+class WifiServer:
     def __init__(self, commands: Commands):
-        self.loop = asyncio.new_event_loop()
+        # self.commands = AsyncCommandManager(commands)
         self.commands = commands
+        self.loop = asyncio.new_event_loop()
         self.thread = threading.Thread(target=self._run_event_loop, daemon=True)
         self.thread.start()
 
+        self.app = app
+        self.register_routes()
+
     def _run_event_loop(self):
-        """Runs the event loop in a separate thread"""
         asyncio.set_event_loop(self.loop)
 
-        # Initialize monitoring tasks in the event loop
+        # wifi server will handle tracking the position task
         self.loop.run_until_complete(self._initialize_commands())
         self.loop.run_forever()
 
     async def _initialize_commands(self):
-        """Initialize all monitoring tasks"""
+        print('wifi commands init...')
         self.commands.state.ultrasonic_task = self.loop.create_task(
             self.commands.object_system.ultrasonic_monitoring())
         self.commands.state.cliff_task = self.loop.create_task(
             self.commands.object_system.cliff_monitoring())
         self.commands.state.pos_track_task = self.loop.create_task(
             self.commands.object_system.px.continuous_position_tracking())
-
-    def run_coroutine(self, coro):
-        """Run a coroutine in the event loop"""
-        future = asyncio.run_coroutine_threadsafe(coro, self.loop)
-        return future.result()
-
-    # Delegate other Picarx methods to the base class
-    def __getattr__(self, attr):
-        return getattr(self.commands, attr)
-
-app = Flask(__name__)
-
-class WifiServer:
-    def __init__(self, commands: Commands):
-        self.commands = AsyncCommandManager(commands)
-        # self.loop = asyncio.new_event_loop()
-        # self.thread = threading.Thread(target=self._run_event_loop, daemon=True)
-        # self.thread.start()
-
-        self.app = app
-        self.register_routes()
-
-    # def _run_event_loop(self):
-    #     asyncio.set_event_loop(self.loop)
-    #
-    #     # wifi server will handle tracking the position task
-    #     self.loop.run_until_complete(self._initialize_commands())
-    #     self.loop.run_forever()
-
-    # async def _initialize_commands(self):
-    #     print('wifi commands init...')
-    #     self.commands.state.ultrasonic_task = self.loop.create_task(
-    #         self.commands.object_system.ultrasonic_monitoring())
-    #     self.commands.state.cliff_task = self.loop.create_task(
-    #         self.commands.object_system.cliff_monitoring())
-    #     self.commands.state.pos_track_task = self.loop.create_task(
-    #         self.commands.object_system.px.continuous_position_tracking())
 
     def register_routes(self):
         self.app.after_request(self.after_request)
@@ -119,7 +120,7 @@ class WifiServer:
         try:
             future = asyncio.run_coroutine_threadsafe(
                 self.commands.scan_env(),
-                self.commands.loop
+                self.loop
             )
 
             result = future.result(timeout=30)
@@ -185,11 +186,11 @@ class WifiServer:
 
             elif cmd == "see":
                 # Create vision task in the event loop
-                self.commands.loop.call_soon_threadsafe(
+                self.loop.call_soon_threadsafe(
                     lambda: setattr(
                         self.commands.state,
                         'vision_task',
-                        self.commands.loop.create_task(self.commands.vision.capture_and_detect())
+                        self.loop.create_task(self.commands.vision.capture_and_detect())
                     )
                 )
                 objects = self.commands.get_objects()
@@ -296,8 +297,8 @@ class WifiServer:
             self.commands.cancel_movement()
 
         # Stop the event loop
-        self.commands.loop.call_soon_threadsafe(self.commands.loop.stop)
-        self.commands.thread.join(timeout=5)  # Add timeout to prevent hanging
+        self.loop.call_soon_threadsafe(self.loop.stop)
+        self.thread.join(timeout=5)  # Add timeout to prevent hanging
 
 
 # for running directly
