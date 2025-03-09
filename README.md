@@ -13,6 +13,7 @@
 4. ~~data chunking~~
 5. test data chunking
 6. make BT data transfer more efficient
+7. simplify and cleanup UI JS
 
 # Running Code
 * I don't have a requirements file set up. Client code should only require `bluedot` and `flask` on client machine or wherever you are sending commands from
