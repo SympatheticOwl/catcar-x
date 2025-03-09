@@ -1,0 +1,339 @@
+<div class="connection-panel">
+    <h2>Connection</h2>
+    <div id="connectionStatus" class="disconnected">Status: Disconnected</div>
+    <div class="button-row">
+        <label for="btAddress">Bluetooth Address</label>
+        <input type="text" id="btAddress" value="D8:3A:DD:6D:E3:54" style="color: white">
+        <button id="connectButton">Connect</button>
+        <button id="disconnectButton" disabled>Disconnect</button>
+    </div>
+</div>
+
+<div id="status">Status: Ready</div>
+
+<div class="controls">
+    <button id="up" disabled>↑</button>
+    <button id="left" disabled>←</button>
+    <button id="right" disabled>→</button>
+    <button id="down" disabled>↓</button>
+</div>
+
+<div id="bt-content" hx-get="/telemetry-fragment" hx-trigger="load" hx-swap="innerHTML"></div>
+
+<script>
+    const API_URL = window.location.origin; // e.g., http://localhost:8080
+    const status = document.getElementById('status');
+    const btAddress = document.getElementById('btAddress');
+    const connectButton = document.getElementById('connectButton');
+    const disconnectButton = document.getElementById('disconnectButton');
+    const connectionStatus = document.getElementById('connectionStatus');
+
+    let isConnected = false;
+
+    // Connect to the Raspberry Pi via Bluetooth
+    connectButton.addEventListener('click', async function () {
+        const address = btAddress.value.trim();
+        if (!address) {
+            status.textContent = 'Status: Please enter a Bluetooth address';
+            return;
+        }
+
+        try {
+            status.textContent = 'Status: Connecting...';
+            const response = await fetch(`${API_URL}/connect`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({bt_address: address})
+            });
+
+            const data = await response.json();
+
+            if (data.status === 'success') {
+                isConnected = true;
+                connectionStatus.textContent = 'Status: Connected';
+                connectionStatus.className = 'connected';
+                status.textContent = `Status: ${data.message}`;
+
+                // Enable control buttons
+                document.querySelectorAll('.controls button').forEach(button => {
+                    button.disabled = false;
+                });
+
+                connectButton.disabled = true;
+                disconnectButton.disabled = false;
+
+                // Save address for future use
+                localStorage.setItem('picarx_bt_address', address);
+            } else {
+                status.textContent = `Status: ${data.message}`;
+            }
+        } catch (error) {
+            status.textContent = `Error: ${error.message}`;
+        }
+    });
+
+    // Disconnect from the Raspberry Pi
+    disconnectButton.addEventListener('click', async function () {
+        try {
+            const response = await fetch(`${API_URL}/disconnect`, {
+                method: 'POST'
+            });
+
+            const data = await response.json();
+
+            isConnected = false;
+            connectionStatus.textContent = 'Status: Disconnected';
+            connectionStatus.className = 'disconnected';
+            status.textContent = `Status: ${data.message}`;
+
+            // Disable control buttons
+            document.querySelectorAll('.controls button').forEach(button => {
+                button.disabled = true;
+            });
+
+            connectButton.disabled = false;
+            disconnectButton.disabled = true;
+        } catch (error) {
+            status.textContent = `Error: ${error.message}`;
+        }
+    });
+
+    // Helper function for making API calls with timeout
+    async function sendCommand(cmd, options = {}) {
+        if (!isConnected) {
+            status.textContent = 'Status: Not connected to Raspberry Pi';
+            return;
+        }
+
+        try {
+            const queryString = options.angle ? `?angle=${options.angle}` : '';
+            console.log(`Sending command: ${cmd}${queryString}`);
+
+            // Use AbortController for timeout control
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), options.timeout || 60000); // Default 60s timeout
+
+            const response = await fetch(`${API_URL}/command/${cmd}${queryString}`, {
+                method: 'POST',
+                signal: controller.signal
+            });
+
+            clearTimeout(timeoutId);
+
+            const data = await response.json();
+            status.textContent = `Status: ${data.message || data.status}`;
+            return data;
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                console.log('Request timed out');
+                status.textContent = `Error: Request timed out. The server may still be processing the command.`;
+            } else {
+                status.textContent = `Error: ${error.message}`;
+            }
+            throw error;
+        }
+    }
+
+    // Handle button press and release
+    function setupButton(id, pressCommand, angle = null) {
+        const button = document.getElementById(id);
+        let isPressed = false;
+
+        // Touch events
+        button.addEventListener('touchstart', async (e) => {
+            e.preventDefault();
+            if (!isPressed) {
+                isPressed = true;
+                button.classList.add('active');
+                await sendCommand(pressCommand, {angle});
+            }
+        });
+
+        button.addEventListener('touchend', async (e) => {
+            e.preventDefault();
+            if (isPressed) {
+                isPressed = false;
+                button.classList.remove('active');
+                await sendCommand('stop');
+            }
+        });
+
+        // Mouse events
+        button.addEventListener('mousedown', async () => {
+            if (!isPressed) {
+                isPressed = true;
+                button.classList.add('active');
+                await sendCommand(pressCommand, {angle});
+            }
+        });
+
+        button.addEventListener('mouseup', async () => {
+            if (isPressed) {
+                isPressed = false;
+                button.classList.remove('active');
+                await sendCommand('stop');
+            }
+        });
+
+        // Prevent stuck movement if mouse leaves button while pressed
+        button.addEventListener('mouseleave', async () => {
+            if (isPressed) {
+                isPressed = false;
+                button.classList.remove('active');
+                await sendCommand('stop');
+            }
+        });
+    }
+
+    // Setup control buttons
+    setupButton('up', 'forward');
+    setupButton('down', 'backward');
+    setupButton('left', 'left', -30);
+    setupButton('right', 'right', 30);
+
+    // Keyboard controls
+    document.addEventListener('keydown', async function (event) {
+        if (!isConnected) return;
+
+        switch (event.key) {
+            case 'ArrowUp':
+                event.preventDefault();
+                document.getElementById('up').classList.add('active');
+                await sendCommand('forward');
+                break;
+            case 'ArrowDown':
+                event.preventDefault();
+                document.getElementById('down').classList.add('active');
+                await sendCommand('backward');
+                break;
+            case 'ArrowLeft':
+                event.preventDefault();
+                document.getElementById('left').classList.add('active');
+                await sendCommand('left', {angle: -30});
+                break;
+            case 'ArrowRight':
+                event.preventDefault();
+                document.getElementById('right').classList.add('active');
+                await sendCommand('right', {angle: 30});
+                break;
+        }
+    });
+
+    document.addEventListener('keyup', async function (event) {
+        if (!isConnected) return;
+
+        switch (event.key) {
+            case 'ArrowUp':
+            case 'ArrowDown':
+            case 'ArrowLeft':
+            case 'ArrowRight':
+                event.preventDefault();
+                document.querySelectorAll('.controls button').forEach(btn => {
+                    btn.classList.remove('active');
+                });
+                await sendCommand('stop');
+                break;
+        }
+    });
+
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', async () => {
+        if (isConnected) {
+            try {
+                // Stop any movement
+                await sendCommand('stop');
+
+                // Disconnect
+                await fetch(`${API_URL}/disconnect`, {
+                    method: 'POST'
+                });
+            } catch (error) {
+                console.error('Error during cleanup:', error);
+            }
+        }
+    });
+
+    // Add some CSS to show active button states
+    document.head.insertAdjacentHTML('beforeend', `
+    <style>
+        .controls button.active {
+            background-color: #2a70c2;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.3);
+            transform: scale(0.95);
+        }
+
+        /* Spinner for scan progress */
+        .spinner {
+            display: inline-block;
+            width: 15px;
+            height: 15px;
+            border: 2px solid rgba(0, 0, 0, 0.1);
+            border-top-color: #4a90e2;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+    `);
+
+    // Add periodic status check for connection monitoring
+    function checkStatus() {
+        if (isConnected) {
+            // Use AbortController to prevent hanging status checks
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+            fetch(`${API_URL}/status`, {
+                signal: controller.signal
+            })
+                .then(response => response.json())
+                .then(data => {
+                    console.log(`check status ${data}`)
+                    // Reset fail count on successful response
+                    statusFailCount = 0;
+
+                    // Update status indicators if needed based on response
+                    if (data.emergency_stop) {
+                        status.textContent = 'Status: Emergency stop active';
+                        status.style.borderLeftColor = '#dc3545';
+                    } else {
+                        status.style.borderLeftColor = '#4a90e2';
+                    }
+                })
+                .catch(error => {
+                    console.error('Status check failed:', error);
+                    // If status check fails multiple times, consider disconnected
+                    if (isConnected) {
+                        statusFailCount++;
+                        console.log(`Status check failure count: ${statusFailCount}/3`);
+
+                        if (statusFailCount > 3) {
+                            connectionStatus.textContent = 'Status: Connection lost';
+                            connectionStatus.className = 'disconnected';
+                            isConnected = false;
+
+                            // Disable control buttons
+                            document.querySelectorAll('.controls button').forEach(button => {
+                                button.disabled = true;
+                            });
+
+                            connectButton.disabled = false;
+                            disconnectButton.disabled = true;
+                        }
+                    }
+                })
+                .finally(() => {
+                    clearTimeout(timeoutId);
+                });
+        }
+    }
+
+    let statusFailCount = 0;
+    // Check status every 5 seconds
+    setInterval(checkStatus, 5000);
+</script>

@@ -1,13 +1,20 @@
 import cv2
+cv2.setNumThreads(1)  # Limit OpenCV threading
+if hasattr(cv2, 'startWindowThread'):
+    cv2.startWindowThread = lambda: None  # Disable window thread
+import threading
+from typing import Optional
 import numpy as np
 import tflite_runtime.interpreter as tflite
 import libcamera
 import asyncio
 import time
 from picamera2 import Picamera2
+from state_handler import State
 
+# TODO: add location tagging to object or object tagging to location
 class VisionSystem:
-    def __init__(self, model_path='efficientdet_lite0.tflite', labels_path='coco_labels.txt'):
+    def __init__(self, state: State, model_path='../efficientdet_lite0.tflite', labels_path='../coco_labels.txt'):
         # Initialize camera
         self.camera = Picamera2()
         # Configure camera for video mode with higher framerate
@@ -45,9 +52,10 @@ class VisionSystem:
         # Initialize detection results
         self.detected_objects = []
         self.frame = None
+        self._frame_lock = threading.Lock()
+        self._latest_jpeg = None
 
     async def capture_and_detect(self):
-        """Continuously capture frames and perform object detection"""
         while True:
             current_time = time.time()
 
@@ -89,17 +97,18 @@ class VisionSystem:
                             'box': (xmin, ymin, xmax, ymax)
                         })
 
-                # Optional: Draw bounding boxes for debugging
-                self._draw_boxes()
+                # Draw boxes and update jpeg frame
+                debug_frame = self._draw_boxes()
+                self._update_jpeg_frame(debug_frame)
+
                 self.last_process_time = current_time
 
-            # Small sleep to prevent CPU overload while maintaining high capture rate
-            await asyncio.sleep(0.01)  # 10ms sleep
+            # Small sleep to prevent CPU overload
+            await asyncio.sleep(0.01)
 
     def _draw_boxes(self):
-        """Draw bounding boxes on the frame for visualization"""
         if self.frame is None:
-            return
+            return None
 
         debug_frame = self.frame.copy()
         for obj in self.detected_objects:
@@ -110,19 +119,15 @@ class VisionSystem:
             cv2.putText(debug_frame, label, (xmin, ymin - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-        # Display the frame (optional, for debugging)
-        cv2.imshow('Object Detection', debug_frame)
-        cv2.waitKey(1)
+        return debug_frame
 
     def _preprocess_image(self, image):
-        """Preprocess image for EfficientDet model which expects uint8 input"""
         image = cv2.resize(image, (self.width, self.height))
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # Convert BGR to RGB
         image = np.expand_dims(image, axis=0)
         return image.astype(np.uint8)
 
     def get_obstacle_info(self):
-        """Return information about detected obstacles"""
         # Focus on objects in the center third of the frame
         if self.frame is None or not self.detected_objects:
             return None
@@ -140,7 +145,20 @@ class VisionSystem:
 
         return center_objects
 
+    def _update_jpeg_frame(self, frame: np.ndarray) -> None:
+        if frame is None:
+            return
+
+        # Encode frame to JPEG
+        ret, jpeg = cv2.imencode('.jpg', frame)
+        if ret:
+            with self._frame_lock:
+                self._latest_jpeg = jpeg.tobytes()
+
+    def get_latest_frame_jpeg(self) -> Optional[bytes]:
+        with self._frame_lock:
+            return self._latest_jpeg
+
     def cleanup(self):
-        """Cleanup camera resources"""
         self.camera.stop()
         cv2.destroyAllWindows()
