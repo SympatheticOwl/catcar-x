@@ -46,29 +46,29 @@ app = Flask(__name__)
 
 class WifiServer:
     def __init__(self, commands: Commands):
-        self.manager = AsyncCommandManager(commands)
-        self.loop = asyncio.new_event_loop()
+        self.commands = AsyncCommandManager(commands)
+        # self.loop = asyncio.new_event_loop()
         # self.thread = threading.Thread(target=self._run_event_loop, daemon=True)
         # self.thread.start()
 
         self.app = app
         self.register_routes()
 
-    def _run_event_loop(self):
-        asyncio.set_event_loop(self.loop)
+    # def _run_event_loop(self):
+    #     asyncio.set_event_loop(self.loop)
+    #
+    #     # wifi server will handle tracking the position task
+    #     self.loop.run_until_complete(self._initialize_commands())
+    #     self.loop.run_forever()
 
-        # wifi server will handle tracking the position task
-        self.loop.run_until_complete(self._initialize_commands())
-        self.loop.run_forever()
-
-    async def _initialize_commands(self):
-        print('wifi commands init...')
-        self.manager.state.ultrasonic_task = self.loop.create_task(
-            self.manager.object_system.ultrasonic_monitoring())
-        self.manager.state.cliff_task = self.loop.create_task(
-            self.manager.object_system.cliff_monitoring())
-        self.manager.state.pos_track_task = self.loop.create_task(
-            self.manager.object_system.px.continuous_position_tracking())
+    # async def _initialize_commands(self):
+    #     print('wifi commands init...')
+    #     self.commands.state.ultrasonic_task = self.loop.create_task(
+    #         self.commands.object_system.ultrasonic_monitoring())
+    #     self.commands.state.cliff_task = self.loop.create_task(
+    #         self.commands.object_system.cliff_monitoring())
+    #     self.commands.state.pos_track_task = self.loop.create_task(
+    #         self.commands.object_system.px.continuous_position_tracking())
 
     def register_routes(self):
         self.app.after_request(self.after_request)
@@ -89,11 +89,11 @@ class WifiServer:
 
     def generate_frames(self):
         while True:
-            if not self.manager:
+            if not self.commands:
                 yield b''
                 continue
 
-            frame = self.manager.vision.get_latest_frame_jpeg()
+            frame = self.commands.vision.get_latest_frame_jpeg()
             if frame is not None:
                 yield b'--frame\r\n'
                 yield b'Content-Type: image/jpeg\r\n\r\n'
@@ -110,7 +110,7 @@ class WifiServer:
         )
 
     def scan_command(self):
-        if not self.manager:
+        if not self.commands:
             return jsonify({
                 "status": "error",
                 "message": "Server still initializing"
@@ -118,8 +118,8 @@ class WifiServer:
 
         try:
             future = asyncio.run_coroutine_threadsafe(
-                self.manager.scan_env(),
-                self.loop
+                self.commands.scan_env(),
+                self.commands.loop
             )
 
             result = future.result(timeout=30)
@@ -138,14 +138,14 @@ class WifiServer:
 
     def execute_command(self, cmd: str):
         try:
-            if not self.manager:
+            if not self.commands:
                 return jsonify({
                     "status": "error",
                     "message": "Server still initializing"
                 }), 503
 
             if cmd == "forward":
-                success = self.manager.forward()
+                success = self.commands.forward()
                 if not success:
                     return jsonify({
                         "status": "error",
@@ -157,7 +157,7 @@ class WifiServer:
                 })
 
             elif cmd == "backward":
-                self.manager.backward()
+                self.commands.backward()
                 return jsonify({
                     "status": "success",
                     "message": "Moving backward"
@@ -165,7 +165,7 @@ class WifiServer:
 
             elif cmd in ["left", "right"]:
                 angle = int(30 if cmd == "right" else -30)
-                success = self.manager.turn(angle)
+                success = self.commands.turn(angle)
                 if not success:
                     return jsonify({
                         "status": "error",
@@ -177,7 +177,7 @@ class WifiServer:
                 })
 
             elif cmd == "stop":
-                self.manager.cancel_movement()
+                self.commands.cancel_movement()
                 return jsonify({
                     "status": "success",
                     "message": "Stopped movement"
@@ -185,14 +185,14 @@ class WifiServer:
 
             elif cmd == "see":
                 # Create vision task in the event loop
-                self.loop.call_soon_threadsafe(
+                self.commands.loop.call_soon_threadsafe(
                     lambda: setattr(
-                        self.manager.state,
+                        self.commands.state,
                         'vision_task',
-                        self.loop.create_task(self.manager.vision.capture_and_detect())
+                        self.commands.loop.create_task(self.commands.vision.capture_and_detect())
                     )
                 )
-                objects = self.manager.get_objects()
+                objects = self.commands.get_objects()
                 return jsonify({
                     "status": "success",
                     "message": "Vision system started. Access video stream at /video_feed",
@@ -201,7 +201,7 @@ class WifiServer:
                 })
 
             elif cmd == "blind":
-                self.manager.stop_vision()
+                self.commands.stop_vision()
                 return jsonify({
                     "status": "success",
                     "message": "Vision system stopped"
@@ -210,7 +210,7 @@ class WifiServer:
 
             elif cmd == "reset":
                 try:
-                    self.manager.reset()
+                    self.commands.reset()
                 except Exception as e:
                     print(f"Reset env error: {e}")
 
@@ -232,33 +232,33 @@ class WifiServer:
             }), 500
 
     def get_status(self):
-        if not self.manager:
+        if not self.commands:
             return jsonify({
                 "status": "error",
                 "message": "Server still initializing"
             }), 503
 
         return jsonify({
-            "object_distance": self.manager.get_object_distance(),
-            "emergency_stop": self.manager.state.emergency_stop_flag
+            "object_distance": self.commands.get_object_distance(),
+            "emergency_stop": self.commands.state.emergency_stop_flag
         })
 
     def get_world_state(self):
-        if not self.manager:
+        if not self.commands:
             return jsonify({
                 "status": "error",
                 "message": "Server still initializing"
             }), 503
 
         return jsonify({
-            "state": self.manager.world_state()
+            "state": self.commands.world_state()
         })
 
     def get_visualization(self):
         if request.method == 'OPTIONS':
             return jsonify({'status': 'ok'})
 
-        if not self.manager:
+        if not self.commands:
             return jsonify({
                 "status": "error",
                 "message": "Server still initializing"
@@ -266,7 +266,7 @@ class WifiServer:
 
         try:
             # Get visualization data directly from the world map
-            visualization_data = self.manager.object_system.world_map.visualize()
+            visualization_data = self.commands.object_system.world_map.visualize()
 
             if visualization_data.get('visualization') is None:
                 return jsonify({
@@ -290,14 +290,14 @@ class WifiServer:
             }), 500
 
     def cleanup(self):
-        if self.manager:
-            if self.manager.state.vision_task:
-                self.manager.stop_vision()
-            self.manager.cancel_movement()
+        if self.commands:
+            if self.commands.state.vision_task:
+                self.commands.stop_vision()
+            self.commands.cancel_movement()
 
         # Stop the event loop
-        self.loop.call_soon_threadsafe(self.loop.stop)
-        self.manager.thread.join(timeout=5)  # Add timeout to prevent hanging
+        self.commands.loop.call_soon_threadsafe(self.commands.loop.stop)
+        self.commands.thread.join(timeout=5)  # Add timeout to prevent hanging
 
 
 # for running directly
