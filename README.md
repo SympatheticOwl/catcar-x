@@ -17,5 +17,6 @@
 
 # Running Code
 * I don't have a requirements file set up. Client code should only require `bluedot` and `flask` on client machine or wherever you are sending commands from
+  * This code has only been tested on Linux and firefox browser 
 * Server code requires PicarX base set up from above, `bluedot`, `flask`, `numpy`, and `matplotlib` on Raspberry Pi.
   * This has only been tested on a Raspberry Pi 4B running Python 3.12.x
