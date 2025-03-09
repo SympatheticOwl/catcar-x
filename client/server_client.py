@@ -554,9 +554,9 @@ def telemetry_fragment():
         print(f"Error reading telemetry fragment: {e}")
         return "<div>Telemetry fragment not found</div>"
 
-@app.route('/scripts/initialize-controllers.js')
+@app.route('/scripts/index.js')
 def initialize_controllers():
-    return send_from_directory('static/scripts', 'initialize-controllers.js')
+    return send_from_directory('static/scripts', 'index.js')
 
 
 @app.route('/connect', methods=['POST'])
